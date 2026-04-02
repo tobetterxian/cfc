@@ -5,6 +5,7 @@ import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.SystemClock;
 
@@ -15,6 +16,7 @@ import android.util.Log;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.SurfaceView;
+import android.view.View;
 import android.view.WindowManager;
 import android.widget.CompoundButton;
 import android.widget.Toast;
@@ -40,11 +42,15 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
     private static final String TAG = "MainActivity";
     private static final int CAMERA_PERMISSION_REQUEST = 1;
     private static final int CREATE_FILE = 11;
+    private static final int MAX_DECODER_BACKLOG = 2;
+    private static final String FORCE_LEGACY_CAMERA_FLAG = "force-legacy-camera";
 
     private GestureDetectorCompat mDetector;
     private Toast introToast;
 
     private CameraBridgeViewBase mOpenCvCameraView;
+    private CameraBridgeViewBase mLegacyCameraView;
+    private CameraBridgeViewBase mCamera2View;
     private ModeSelToggle mModeSwitch;
     private int modeVal = 0;
     private int detectedMode = 68;
@@ -61,7 +67,9 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
                 // Load native library after(!) OpenCV initialization
                 System.loadLibrary("cfc-cpp");
 
-                mOpenCvCameraView.enableView();
+                if (mOpenCvCameraView != null) {
+                    mOpenCvCameraView.enableView();
+                }
             } else {
                 super.onManagerConnected(status);
             }
@@ -88,9 +96,12 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
 
         setContentView(R.layout.activity_main);
         ensureSessionLogger();
-        mOpenCvCameraView = findViewById(R.id.main_surface);
-        mOpenCvCameraView.setVisibility(SurfaceView.VISIBLE);
-        mOpenCvCameraView.setCvCameraViewListener(this);
+        mLegacyCameraView = findViewById(R.id.main_surface_legacy);
+        mCamera2View = findViewById(R.id.main_surface_camera2);
+        configureCameraView(mLegacyCameraView);
+        configureCameraView(mCamera2View);
+        selectCameraView(shouldUseCamera2());
+        grantCameraPermissionIfAvailable();
 
         mModeSwitch = (ModeSelToggle) findViewById(R.id.mode_switch);
         mModeSwitch.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
@@ -114,7 +125,7 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         if (requestCode == CAMERA_PERMISSION_REQUEST) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-                mOpenCvCameraView.setCameraPermissionGranted();
+                grantCameraPermissionIfAvailable();
             } else {
                 String message = "Camera permission was not granted";
                 Log.e(TAG, message);
@@ -139,8 +150,7 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
         closeSessionLogger();
         shutdownJNI();
         super.onPause();
-        if (mOpenCvCameraView != null)
-            mOpenCvCameraView.disableView();
+        disableAllCameraViews();
     }
 
     @Override
@@ -161,8 +171,7 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
         closeSessionLogger();
         shutdownJNI();
         super.onDestroy();
-        if (mOpenCvCameraView != null)
-            mOpenCvCameraView.disableView();
+        disableAllCameraViews();
     }
 
     @Override
@@ -178,6 +187,15 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
         long frameStartedNs = SystemClock.elapsedRealtimeNanos();
         // get current camera frame as OpenCV Mat object
         Mat mat = frame.rgba();
+        NativeTelemetrySnapshot beforeTelemetry = NativeTelemetrySnapshot.fromWireString(getDecoderTelemetryJNI());
+
+        if (beforeTelemetry.backlog >= MAX_DECODER_BACKLOG) {
+            long frameFinishedNs = SystemClock.elapsedRealtimeNanos();
+            if (sessionLogger != null) {
+                sessionLogger.logFrame(frameStartedNs, frameFinishedNs, modeVal, detectedMode, "#drop_backlog", beforeTelemetry);
+            }
+            return mat;
+        }
 
         // native call to process current camera frame
         String res = processImageJNI(mat.getNativeObjAddr(), this.dataPath, this.modeVal);
@@ -189,18 +207,7 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
 
         // res will contain a file path if we completed a transfer. Ask the user where to save it
         if (res.startsWith("/")) {
-            if (res.length() == 2 && res.charAt(1) == '4') {
-                detectedMode = 4;
-            }
-            else if (res.length() == 3 && res.charAt(1) == '6' && res.charAt(2) == '6') {
-                detectedMode = 66;
-            }
-            else if (res.length() == 3 && res.charAt(1) == '6' && res.charAt(2) == '7') {
-                detectedMode = 67;
-            }
-            else {
-                detectedMode = 68;
-            }
+            detectedMode = parseDetectedModeResult(res);
             runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
@@ -222,6 +229,77 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
 
         // return processed frame for live preview
         return mat;
+    }
+
+    private int parseDetectedModeResult(String res) {
+        if (res == null || res.length() < 2 || res.charAt(0) != '/') {
+            return 68;
+        }
+        try {
+            return Integer.parseInt(res.substring(1));
+        } catch (NumberFormatException e) {
+            Log.w(TAG, "Unexpected detected mode payload: " + res, e);
+            return 68;
+        }
+    }
+
+    private void configureCameraView(CameraBridgeViewBase cameraView) {
+        if (cameraView == null) {
+            return;
+        }
+        cameraView.setVisibility(View.GONE);
+        cameraView.setCvCameraViewListener(this);
+    }
+
+    private void disableAllCameraViews() {
+        if (mLegacyCameraView != null) {
+            mLegacyCameraView.disableView();
+        }
+        if (mCamera2View != null) {
+            mCamera2View.disableView();
+        }
+    }
+
+    private void selectCameraView(boolean preferCamera2) {
+        CameraBridgeViewBase preferred = preferCamera2 ? mCamera2View : mLegacyCameraView;
+        CameraBridgeViewBase fallback = preferCamera2 ? mLegacyCameraView : mCamera2View;
+
+        if (preferred == null) {
+            preferred = fallback;
+            fallback = null;
+        }
+
+        if (preferred == null) {
+            throw new IllegalStateException("No camera views available");
+        }
+
+        if (fallback != null) {
+            fallback.disableView();
+            fallback.setVisibility(View.GONE);
+        }
+
+        preferred.setVisibility(SurfaceView.VISIBLE);
+        mOpenCvCameraView = preferred;
+        Log.i(TAG, "Selected camera path: " + (mOpenCvCameraView == mCamera2View ? "camera2" : "legacy"));
+    }
+
+    private boolean shouldUseCamera2() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+            return false;
+        }
+        return !(new File(getFilesDir(), FORCE_LEGACY_CAMERA_FLAG).exists());
+    }
+
+    private void grantCameraPermissionIfAvailable() {
+        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            return;
+        }
+        if (mLegacyCameraView != null) {
+            mLegacyCameraView.setCameraPermissionGranted();
+        }
+        if (mCamera2View != null) {
+            mCamera2View.setCameraPermissionGranted();
+        }
     }
 
     private void ensureSessionLogger() {

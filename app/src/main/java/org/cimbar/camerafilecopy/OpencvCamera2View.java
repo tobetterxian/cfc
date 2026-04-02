@@ -4,13 +4,12 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.List;
 
-
 import android.annotation.TargetApi;
 import android.content.Context;
 import android.graphics.ImageFormat;
 import android.hardware.camera2.CameraAccessException;
-import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
+import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraDevice;
 import android.hardware.camera2.CameraManager;
 import android.hardware.camera2.CaptureRequest;
@@ -21,6 +20,7 @@ import android.os.Handler;
 import android.os.HandlerThread;
 import android.util.AttributeSet;
 import android.util.Log;
+import android.util.Range;
 import android.view.Surface;
 import android.view.ViewGroup.LayoutParams;
 
@@ -44,6 +44,7 @@ import org.opencv.imgproc.Imgproc;
 public class OpencvCamera2View extends CameraBridgeViewBase {
 
     private static final String LOGTAG = "JavaCamera2View";
+    private static final int MAX_IMAGES = 3;
 
     private ImageReader mImageReader;
     private int mPreviewFormat = ImageFormat.YUV_420_888;
@@ -53,6 +54,15 @@ public class OpencvCamera2View extends CameraBridgeViewBase {
     private CaptureRequest.Builder mPreviewRequestBuilder;
     private String mCameraID;
     private android.util.Size mPreviewSize = new android.util.Size(-1, -1);
+    private CameraCharacteristics mCharacteristics;
+    private boolean mSupportsManualSensor;
+    private boolean mSupportsManualPostProcessing;
+    private boolean mSupportsHighSpeedVideo;
+    private boolean mSupportsAeLock;
+    private boolean mSupportsAwbLock;
+    private CameraCaptureProfile mSelectedProfile = CameraCaptureProfile.balanced();
+    private Range<Integer> mSelectedFpsRange;
+    private String mCapabilitySummary = "uninitialized";
 
     private HandlerThread mBackgroundThread;
     private Handler mBackgroundHandler;
@@ -63,6 +73,33 @@ public class OpencvCamera2View extends CameraBridgeViewBase {
 
     public OpencvCamera2View(Context context, AttributeSet attrs) {
         super(context, attrs);
+    }
+
+    protected Size bestCameraFrameSize(List<?> supportedSizes, ListItemAccessor accessor, int surfaceWidth, int surfaceHeight) {
+        int calcWidth = Integer.MAX_VALUE;
+        int calcHeight = Integer.MAX_VALUE;
+
+        int maxAllowedWidth = (mMaxWidth != MAX_UNSPECIFIED && mMaxWidth < surfaceWidth) ? mMaxWidth : surfaceWidth;
+        int maxAllowedHeight = (mMaxHeight != MAX_UNSPECIFIED && mMaxHeight < surfaceHeight) ? mMaxHeight : surfaceHeight;
+
+        for (Object size : supportedSizes) {
+            int width = accessor.getWidth(size);
+            int height = accessor.getHeight(size);
+            int minDim = Math.min(width, height);
+            if (minDim < 960 || minDim > 1080) {
+                continue;
+            }
+            if (width <= maxAllowedWidth && height <= maxAllowedHeight) {
+                if (width < calcWidth && height <= calcHeight) {
+                    calcWidth = width;
+                    calcHeight = height;
+                }
+            }
+        }
+        if (calcWidth != Integer.MAX_VALUE && calcHeight != Integer.MAX_VALUE) {
+            return new Size(calcWidth, calcHeight);
+        }
+        return calculateCameraFrameSize(supportedSizes, accessor, surfaceWidth, surfaceHeight);
     }
 
     private void startBackgroundThread() {
@@ -112,12 +149,14 @@ public class OpencvCamera2View extends CameraBridgeViewBase {
                 }
             }
             if (mCameraID != null) {
+                loadCameraCapabilities(manager, mCameraID);
                 Log.i(LOGTAG, "Opening camera: " + mCameraID);
                 manager.openCamera(mCameraID, mStateCallback, mBackgroundHandler);
             } else { // make JavaCamera2View behaves in the same way as JavaCameraView
                 Log.i(LOGTAG, "Trying to open camera with the value (" + mCameraIndex + ")");
                 if (mCameraIndex < camList.length) {
                     mCameraID = camList[mCameraIndex];
+                    loadCameraCapabilities(manager, mCameraID);
                     manager.openCamera(mCameraID, mStateCallback, mBackgroundHandler);
                 } else {
                     // CAMERA_DISCONNECTED is used when the camera id is no longer valid
@@ -172,7 +211,7 @@ public class OpencvCamera2View extends CameraBridgeViewBase {
                 return;
             }
 
-            mImageReader = ImageReader.newInstance(w, h, mPreviewFormat, 2);
+            mImageReader = ImageReader.newInstance(w, h, mPreviewFormat, MAX_IMAGES);
             mImageReader.setOnImageAvailableListener(new ImageReader.OnImageAvailableListener() {
                 @Override
                 public void onImageAvailable(ImageReader reader) {
@@ -206,23 +245,9 @@ public class OpencvCamera2View extends CameraBridgeViewBase {
                         }
                         mCaptureSession = cameraCaptureSession;
                         try {
-                            mPreviewRequestBuilder.set(CaptureRequest.CONTROL_MODE,
-                                    CaptureRequest.CONTROL_MODE_OFF);
-                            mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AF_MODE,
-                                    CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO);
-                            mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AE_MODE,
-                                    CaptureRequest.CONTROL_AE_MODE_OFF);
-                            mPreviewRequestBuilder.set(CaptureRequest.CONTROL_AWB_MODE,
-                                    CaptureRequest.CONTROL_AWB_MODE_OFF);
-                            mPreviewRequestBuilder.set(CaptureRequest.SENSOR_SENSITIVITY,
-                                    400);
-                            mPreviewRequestBuilder.set(CaptureRequest.SENSOR_FRAME_DURATION,
-                                    16666666L);
-                            mPreviewRequestBuilder.set(CaptureRequest.SENSOR_EXPOSURE_TIME,
-                                    16666666L);
-
+                            applyCaptureProfile(mPreviewRequestBuilder);
                             mCaptureSession.setRepeatingRequest(mPreviewRequestBuilder.build(), null, mBackgroundHandler);
-                            Log.i(LOGTAG, "CameraPreviewSession has been started");
+                            Log.i(LOGTAG, "CameraPreviewSession has been started with " + mCapabilitySummary);
                         } catch (Exception e) {
                             Log.e(LOGTAG, "createCaptureSession failed", e);
                         }
@@ -286,10 +311,11 @@ public class OpencvCamera2View extends CameraBridgeViewBase {
         CameraManager manager = (CameraManager) getContext().getSystemService(Context.CAMERA_SERVICE);
         try {
             CameraCharacteristics characteristics = manager.getCameraCharacteristics(mCameraID);
+            mCharacteristics = characteristics;
             StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
             android.util.Size[] sizes = map.getOutputSizes(ImageReader.class);
             List<android.util.Size> sizes_list = Arrays.asList(sizes);
-            Size frameSize = calculateCameraFrameSize(sizes_list, new JavaCameraSizeAccessor(), width, height);
+            Size frameSize = bestCameraFrameSize(sizes_list, new JavaCameraSizeAccessor(), width, height);
             Log.i(LOGTAG, "Selected preview size to " + Integer.valueOf((int)frameSize.width) + "x" + Integer.valueOf((int)frameSize.height));
             assert(!(frameSize.width == 0 || frameSize.height == 0));
             if (mPreviewSize.getWidth() == frameSize.width && mPreviewSize.getHeight() == frameSize.height)
@@ -337,6 +363,100 @@ public class OpencvCamera2View extends CameraBridgeViewBase {
             throw new RuntimeException("Interrupted while setCameraPreviewSize.", e);
         }
         return true;
+    }
+
+    private void loadCameraCapabilities(CameraManager manager, String cameraId) throws CameraAccessException {
+        mCharacteristics = manager.getCameraCharacteristics(cameraId);
+        mSupportsManualSensor = hasCapability(mCharacteristics,
+                CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_SENSOR);
+        mSupportsManualPostProcessing = hasCapability(mCharacteristics,
+                CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_MANUAL_POST_PROCESSING);
+        mSupportsHighSpeedVideo = hasCapability(mCharacteristics,
+                CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES_CONSTRAINED_HIGH_SPEED_VIDEO);
+        mSupportsAeLock = Boolean.TRUE.equals(mCharacteristics.get(CameraCharacteristics.CONTROL_AE_LOCK_AVAILABLE));
+        mSupportsAwbLock = Boolean.TRUE.equals(mCharacteristics.get(CameraCharacteristics.CONTROL_AWB_LOCK_AVAILABLE));
+        mSelectedProfile = selectCaptureProfile();
+        mSelectedFpsRange = selectFpsRange(mCharacteristics, mSelectedProfile.targetFps);
+        mCapabilitySummary = "cameraId=" + cameraId +
+                " manualSensor=" + mSupportsManualSensor +
+                " manualPost=" + mSupportsManualPostProcessing +
+                " highSpeed=" + mSupportsHighSpeedVideo +
+                " aeLock=" + mSupportsAeLock +
+                " awbLock=" + mSupportsAwbLock +
+                " profile=" + mSelectedProfile.describe() +
+                " fpsRange=" + (mSelectedFpsRange == null ? "none" : mSelectedFpsRange.toString());
+        Log.i(LOGTAG, "Camera2 capabilities: " + mCapabilitySummary);
+    }
+
+    private CameraCaptureProfile selectCaptureProfile() {
+        if (mSupportsManualSensor && mSupportsManualPostProcessing && mSupportsHighSpeedVideo) {
+            return CameraCaptureProfile.throughput();
+        }
+        if (mSupportsAeLock && mSupportsAwbLock) {
+            return CameraCaptureProfile.balanced();
+        }
+        return CameraCaptureProfile.robust();
+    }
+
+    private void applyCaptureProfile(CaptureRequest.Builder builder) {
+        builder.set(CaptureRequest.CONTROL_MODE, CaptureRequest.CONTROL_MODE_AUTO);
+        builder.set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_VIDEO);
+        if (mSelectedFpsRange != null) {
+            builder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, mSelectedFpsRange);
+        }
+
+        if (mSelectedProfile.useManualSensor && mSupportsManualSensor) {
+            builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_OFF);
+            builder.set(CaptureRequest.SENSOR_SENSITIVITY, mSelectedProfile.sensorSensitivity);
+            builder.set(CaptureRequest.SENSOR_FRAME_DURATION, mSelectedProfile.frameDurationNs);
+            builder.set(CaptureRequest.SENSOR_EXPOSURE_TIME, mSelectedProfile.exposureTimeNs);
+            builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO);
+            if (mSupportsAwbLock) {
+                builder.set(CaptureRequest.CONTROL_AWB_LOCK, true);
+            }
+        } else {
+            builder.set(CaptureRequest.CONTROL_AE_MODE, CaptureRequest.CONTROL_AE_MODE_ON);
+            builder.set(CaptureRequest.CONTROL_AWB_MODE, CaptureRequest.CONTROL_AWB_MODE_AUTO);
+            if (mSupportsAeLock) {
+                builder.set(CaptureRequest.CONTROL_AE_LOCK, mSelectedProfile.lockAuto3A);
+            }
+            if (mSupportsAwbLock) {
+                builder.set(CaptureRequest.CONTROL_AWB_LOCK, mSelectedProfile.lockAuto3A);
+            }
+        }
+    }
+
+    private boolean hasCapability(CameraCharacteristics characteristics, int expectedCapability) {
+        int[] capabilities = characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES);
+        if (capabilities == null) {
+            return false;
+        }
+        for (int capability : capabilities) {
+            if (capability == expectedCapability) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private Range<Integer> selectFpsRange(CameraCharacteristics characteristics, int targetFps) {
+        Range<Integer>[] ranges = characteristics.get(CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES);
+        if (ranges == null || ranges.length == 0) {
+            return null;
+        }
+
+        Range<Integer> selected = null;
+        int bestScore = Integer.MAX_VALUE;
+        for (Range<Integer> range : ranges) {
+            int upper = range.getUpper();
+            int lower = range.getLower();
+            int score = Math.abs(upper - targetFps) * 10 + Math.abs(lower - Math.min(lower, targetFps));
+            if (selected == null || score < bestScore || (score == bestScore && upper > selected.getUpper())) {
+                selected = range;
+                bestScore = score;
+            }
+        }
+        return selected;
     }
 
     private class JavaCamera2Frame implements CvCameraViewFrame {
