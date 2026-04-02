@@ -1,0 +1,28 @@
+{
+  "device": {
+    "model": "",
+    "abi": "arm64-v8a"
+  },
+  "capture": {
+    "scenario": "",
+    "mode": "B",
+    "fps": 15
+  },
+  "profiling": {
+    "tool": "simpleperf",
+    "duration_s": 0
+  },
+  "hotspots": [
+    {
+      "symbol": "",
+      "self_ms": 0,
+      "total_ms": 0,
+      "calls": 0
+    }
+  ],
+  "candidate_optimization": {
+    "path": "neon",
+    "owner": "",
+    "expected_gain_pct": 0
+  }
+}

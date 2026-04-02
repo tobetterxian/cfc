@@ -8,6 +8,7 @@ set (SOURCES
 	CellTest.cpp
 	CellDriftTest.cpp
 	CellPositionsTest.cpp
+	ConfigTest.cpp
 	CimbDecoderTest.cpp
 	CimbEncoderTest.cpp
 	CimbReaderTest.cpp

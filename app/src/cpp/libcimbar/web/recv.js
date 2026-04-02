@@ -102,6 +102,30 @@ var Recv = function () {
   var _supportedFormats = ["NV12", "I420"]; // have cimbard_* return this somehow?
 
   var _mode = 0;
+  var _modeLabels = {
+    0: "Auto",
+    4: "4C",
+    66: "Bu",
+    67: "Bm",
+    68: "B",
+    69: "5x5",
+    70: "5x5d"
+  };
+  var _modeValues = {
+    "Auto": 0,
+    "4C": 4,
+    "4c": 4,
+    "B": 68,
+    "Bm": 67,
+    "BM": 67,
+    "Bu": 66,
+    "BU": 66,
+    "5x5": 69,
+    "5X5": 69,
+    "5x5d": 70,
+    "5X5D": 70
+  };
+  var _modeCssClasses = ["mode-auto", "mode-b", "mode-bm", "mode-bu", "mode-4c", "mode-5x5", "mode-5x5d"];
 
   function _toggleFullscreen() {
     if (document.fullscreenElement) {
@@ -283,7 +307,9 @@ var Recv = function () {
       // make sure the camera feed stays up
       Recv.watch_for_camera_pause();
 
-      const modeVals = [66, 68, 67, 4];
+      const commonModeVals = [68, 67, 66, 4];
+      const extendedModeVals = [68, 67, 66, 4, 69, 70];
+      const modeVals = _counter > (commonModeVals.length * 3) ? extendedModeVals : commonModeVals;
 
       var vf = undefined;
       if (_framesInFlight > 20) {
@@ -315,7 +341,7 @@ var Recv = function () {
             Recv.download_bytes(buff, width + "x" + height + "x" + _counter + "." + format);
           }
 
-          let mode = _mode || modeVals[_counter % modeVals.length];
+          let mode = _mode || modeVals[(_counter - 1) % modeVals.length];
           _workers[_nextWorker].postMessage({ type: 'proc', pixels: buff, format: format, width: width, height: height, mode: mode }, [buff.buffer]);
         } catch (e) {
           console.log(e);
@@ -413,24 +439,41 @@ var Recv = function () {
       document.getElementById("nav-content").blur();
     },
 
-    setMode: function (modeVal) {
-      // these should be moved elsewhere...
-      const modeToString = {
-        4: "4C",
-        8: "8C",
-        66: "Bu",
-        67: "Bm",
-        68: "B"
-      };
-      let modeStringToVal = {
-        "Auto": 0
-      };
-      for (const val in modeToString) {
-        modeStringToVal[modeToString[val]] = val;
+    updateModeNav: function () {
+      var nav = document.getElementById("nav-container");
+      if (!nav) {
+        return;
+      }
+      _modeCssClasses.forEach(function (modeClass) {
+        nav.classList.remove(modeClass);
+      });
+
+      const cssClass = {
+        0: "mode-auto",
+        4: "mode-4c",
+        66: "mode-bu",
+        67: "mode-bm",
+        68: "mode-b",
+        69: "mode-5x5",
+        70: "mode-5x5d"
+      }[_mode];
+      if (cssClass) {
+        nav.classList.add(cssClass);
       }
 
-      if (modeVal in modeStringToVal) {
-        modeVal = modeStringToVal[modeVal];
+      const modeLabel = document.getElementById("mode-val");
+      if (modeLabel) {
+        modeLabel.textContent = _modeLabels[_mode] || String(_mode);
+      }
+    },
+
+    setMode: function (modeVal) {
+      if (Object.prototype.hasOwnProperty.call(_modeValues, modeVal)) {
+        modeVal = _modeValues[modeVal];
+      }
+      modeVal = Number(modeVal);
+      if (!Number.isFinite(modeVal)) {
+        modeVal = 0;
       }
 
       // configure wasm in main thread
@@ -439,21 +482,7 @@ var Recv = function () {
         Module._cimbard_configure_decode(_mode);
         Sink.allocate();
       }
-
-      // update ui
-      if (_mode > 0) {
-        var nav = document.getElementById("mode-val");
-        nav.innerHTML = modeToString[_mode];
-      }
-
-      var nav = document.getElementById("nav-container");
-      if (_mode == 0) {
-        nav.classList.add("mode-auto");
-        nav.classList.remove("mode-b");
-      } else {
-        nav.classList.add("mode-b");
-        nav.classList.remove("mode-auto");
-      }
+      Recv.updateModeNav();
     },
 
     set_HTML: function (id, msg, only_if_unset) {

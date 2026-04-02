@@ -96,6 +96,8 @@
     #nav-container a.mode-b,
     #nav-container a.mode-bm,
     #nav-container a.mode-bu,
+    #nav-container a.mode-5x5,
+    #nav-container a.mode-5x5d,
     #nav-container a.mode-4c {
       color: #555;
     }
@@ -103,6 +105,8 @@
     #nav-container.mode-b a.mode-b,
     #nav-container.mode-bm a.mode-bm,
     #nav-container.mode-bu a.mode-bu,
+    #nav-container.mode-5x5 a.mode-5x5,
+    #nav-container.mode-5x5d a.mode-5x5d,
     #nav-container.mode-4c a.mode-4c {
       color: #9fa6b2;
     }
@@ -293,7 +297,9 @@
 
     #nav-content li.modesel a {
       display: inline-block;
-      width: 2em;
+      min-width: 2em;
+      padding-left: 0.35em;
+      padding-right: 0.35em;
     }
 
     #nav-content li:hover {
@@ -357,7 +363,17 @@
           <a class="mode-b" href="javascript:void(0)" onclick="Main.setMode('B')">B</a>
           <a class="mode-bm" href="javascript:void(0)" onclick="Main.setMode('Bm')">Bm</a>
           <a class="mode-bu" href="javascript:void(0)" onclick="Main.setMode('Bu')">Bu</a>
+          <a class="mode-5x5" href="javascript:void(0)" onclick="Main.setMode('5x5')">5x5</a>
+          <a class="mode-5x5d" href="javascript:void(0)" onclick="Main.setMode('5x5d')">5x5d</a>
           <a class="mode-4c" href="javascript:void(0)" onclick="Main.setMode('4C')">4C</a>
+        </li>
+        <li class="modesel">
+          <h4>Profile</h4>
+          <a href="javascript:void(0)" onclick="Main.setProfile('R1')">R1</a>
+          <a href="javascript:void(0)" onclick="Main.setProfile('R2')">R2</a>
+          <a href="javascript:void(0)" onclick="Main.setProfile('R3')">R3</a>
+          <a href="javascript:void(0)" onclick="Main.setProfile('X1')">X1</a>
+          <a href="javascript:void(0)" onclick="Main.setProfile('X2')">X2</a>
         </li>
         <li>
           <h4>Framerate</h4>

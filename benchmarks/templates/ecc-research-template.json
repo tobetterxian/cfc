@@ -1,0 +1,24 @@
+{
+  "baseline": {
+    "mode": "B",
+    "decoder": "hard-decision-rs"
+  },
+  "candidate": {
+    "branch": "exp/ecc-erasure-aware",
+    "decoder": "rs-erasure",
+    "uses_soft_info": true
+  },
+  "dataset": {
+    "scenario": "",
+    "frames": 0
+  },
+  "metrics": {
+    "goodput_kbps": 0,
+    "time_to_first_chunk_ms": 0,
+    "mixed_frame_utilization_ratio": 0
+  },
+  "decision": {
+    "worth_mainline": false,
+    "notes": ""
+  }
+}

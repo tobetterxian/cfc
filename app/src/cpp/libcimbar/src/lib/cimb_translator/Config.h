@@ -37,6 +37,10 @@ namespace cimbar
 					return cimbar::Conf8x8_micro();
 				case 67:
 					return cimbar::Conf8x8_mini();
+				case 69:
+					return cimbar::Conf5x5();
+				case 70:
+					return cimbar::Conf5x5d();
 				case 68:
 				default:
 					return cimbar::Conf8x8();

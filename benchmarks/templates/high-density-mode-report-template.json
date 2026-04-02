@@ -1,0 +1,28 @@
+{
+  "device": {
+    "model": "",
+    "android_api": 0,
+    "camera_profile": ""
+  },
+  "sender": {
+    "profile": "X1",
+    "mode": "5x5",
+    "fps": 18
+  },
+  "receiver": {
+    "autodetect_warmup_frames": 12,
+    "roi_enabled": true,
+    "fusion_enabled": true
+  },
+  "metrics": {
+    "goodput_kbps": 0,
+    "time_to_first_chunk_ms": 0,
+    "time_to_complete_file_ms": 0,
+    "scan_success_ratio": 0,
+    "decode_success_ratio": 0
+  },
+  "decision": {
+    "default_allowed": false,
+    "fallback_reason": ""
+  }
+}

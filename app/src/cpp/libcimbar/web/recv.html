@@ -129,12 +129,22 @@
 
     /* options */
     #nav-container a.mode-auto,
-    #nav-container a.mode-b {
+    #nav-container a.mode-b,
+    #nav-container a.mode-bm,
+    #nav-container a.mode-bu,
+    #nav-container a.mode-5x5,
+    #nav-container a.mode-5x5d,
+    #nav-container a.mode-4c {
       color: #555;
     }
 
     #nav-container.mode-auto a.mode-auto,
-    #nav-container.mode-b a.mode-b {
+    #nav-container.mode-b a.mode-b,
+    #nav-container.mode-bm a.mode-bm,
+    #nav-container.mode-bu a.mode-bu,
+    #nav-container.mode-5x5 a.mode-5x5,
+    #nav-container.mode-5x5d a.mode-5x5d,
+    #nav-container.mode-4c a.mode-4c {
       color: #9fa6b2;
     }
 
@@ -396,8 +406,14 @@
         <li class="modesel">
           <h4>Mode</h4>
           <a class="mode-auto" href="javascript:void(0)" onclick="Recv.setMode('Auto')">Auto</a>
-          <a class="mode-b" id="mode-val" href="javascript:void(0)" onclick="Recv.setMode(this.textContent)">B</a>
+          <a class="mode-b" href="javascript:void(0)" onclick="Recv.setMode('B')">B</a>
+          <a class="mode-bm" href="javascript:void(0)" onclick="Recv.setMode('Bm')">Bm</a>
+          <a class="mode-bu" href="javascript:void(0)" onclick="Recv.setMode('Bu')">Bu</a>
+          <a class="mode-5x5" href="javascript:void(0)" onclick="Recv.setMode('5x5')">5x5</a>
+          <a class="mode-5x5d" href="javascript:void(0)" onclick="Recv.setMode('5x5d')">5x5d</a>
+          <a class="mode-4c" href="javascript:void(0)" onclick="Recv.setMode('4C')">4C</a>
         </li>
+        <li class="small"><a href="javascript:void(0)">Current: <span id="mode-val">Auto</span></a></li>
         <li class="small"><a href="javascript:void(0)" onclick="Recv.showDebug()">Debug</a></li>
         <li class="small"><a href="javascript:void(0)" onclick="Recv.toggleFullscreen()">Fullscreen</a></li>
         <li class="small"><a href="https://github.com/sz3/libcimbar">github</a></li>
@@ -441,3 +457,9 @@
 </body>
 
 </html>
+    #nav-content li.modesel a {
+      display: inline-block;
+      min-width: 2em;
+      padding-left: 0.35em;
+      padding-right: 0.35em;
+    }

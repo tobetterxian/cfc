@@ -11,6 +11,15 @@
 - `benchmarks/templates/`
   - 报告模板和日志字段模板
 
+Phase 5 额外约定：
+
+- `benchmarks/scenarios/high-density/`
+  - 5x5 / 5x5d 模式的样本清单与回放说明
+- `benchmarks/scenarios/ecc/`
+  - erasure-aware ECC 和软信息聚合实验场景
+- `benchmarks/scenarios/high-speed/`
+  - 高帧率专线机型与 session 记录
+
 ## 场景建议
 
 至少准备以下场景：
@@ -45,3 +54,11 @@ python3 tools/bench/summarize_session.py /path/to/frames.csv
 - `scan_success_ratio`
 - `decode_success_ratio`
 - `avg_backlog`
+
+Phase 5 建议额外记录：
+
+- `mode_id`
+- `autodetect_warmup_frames`
+- `mixed_frame_utilization_ratio`
+- `hotspot_topk`
+- `high_speed_session_enabled`

@@ -244,5 +244,15 @@ float cimbare_get_aspect_ratio()
 	return window_size_x / window_size_y;
 }
 
+int cimbare_get_mode()
+{
+	return _modeVal;
+}
+
+int cimbare_get_protocol_version()
+{
+	return 1;
+}
+
 
 }

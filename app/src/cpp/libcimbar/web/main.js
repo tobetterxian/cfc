@@ -9,6 +9,48 @@ var Main = function () {
   var _showStats = false;
   var _counter = 0;
   var _renderTime = 0;
+  var _rafHandle = 0;
+  var _lastFrameTs = 0;
+  var _nextFrameAt = 0;
+  var _selectedMode = 68;
+  var _protocolVersion = 1;
+  var _syncEvery = 32;
+  var _profile = "R2";
+  var _modeLabels = {
+    4: "4C",
+    66: "Bu",
+    67: "Bm",
+    68: "B",
+    69: "5x5",
+    70: "5x5d",
+  };
+  var _modeValues = {
+    4: 4,
+    66: 66,
+    67: 67,
+    68: 68,
+    69: 69,
+    70: 70,
+    "4C": 4,
+    "4c": 4,
+    "B": 68,
+    "Bm": 67,
+    "BM": 67,
+    "Bu": 66,
+    "BU": 66,
+    "5x5": 69,
+    "5X5": 69,
+    "5x5d": 70,
+    "5X5D": 70,
+  };
+  var _modeCssClasses = ["mode-b", "mode-bm", "mode-bu", "mode-4c", "mode-5x5", "mode-5x5d"];
+  var _profiles = {
+    R1: { mode: "Bm", fps: 10, colorBalance: false },
+    R2: { mode: "B", fps: 15, colorBalance: false },
+    R3: { mode: "Bu", fps: 20, colorBalance: false },
+    X1: { mode: "5x5", fps: 18, colorBalance: false },
+    X2: { mode: "5x5d", fps: 16, colorBalance: false },
+  };
 
   var _wakeLock = undefined;
 
@@ -73,11 +115,30 @@ var Main = function () {
     return wasmData;
   }
 
+  function scheduleNextFrame() {
+    if (_rafHandle) {
+      return;
+    }
+    _rafHandle = requestAnimationFrame(Main.nextFrame);
+  }
+
+  function resolveModeValue(modeInput) {
+    if (Object.prototype.hasOwnProperty.call(_modeValues, modeInput)) {
+      return _modeValues[modeInput];
+    }
+    return 68;
+  }
+
+  function modeLabel(modeVal) {
+    return _modeLabels[modeVal] || String(modeVal);
+  }
+
   // public interface
   return {
     init: function (canvas) {
-      Main.setMode('B');
+      Main.setProfile(_profile);
       Main.check_GL_enabled(canvas);
+      Main.publishProtocolMetadata(0, 0);
     },
 
     check_GL_enabled: function (canvas) {
@@ -240,24 +301,35 @@ var Main = function () {
       Main.blurNav(false);
     },
 
-    nextFrame: function () {
+    nextFrame: function (timestamp) {
+      _rafHandle = 0;
+      timestamp = timestamp || performance.now();
+      if (_nextFrameAt && timestamp < _nextFrameAt) {
+        scheduleNextFrame();
+        return;
+      }
+
       _counter += 1;
       if (_pause > 0) {
         _pause -= 1;
       }
       var start = performance.now();
+      var frameCount = 0;
       if (!Main.isPaused()) {
         Module._cimbare_render();
-        var frameCount = Module._cimbare_next_frame(_colorBalance);
+        frameCount = Module._cimbare_next_frame(_colorBalance);
       }
 
       var elapsed = performance.now() - start;
-      var nextInterval = _interval > elapsed ? _interval - elapsed : 0;
-      setTimeout(Main.nextFrame, nextInterval);
+      var frameInterval = _lastFrameTs ? (timestamp - _lastFrameTs) : 0;
+      _lastFrameTs = timestamp;
+      _nextFrameAt = timestamp + _interval;
+      scheduleNextFrame();
+      Main.publishProtocolMetadata(frameCount, frameInterval);
 
       if (_showStats && frameCount) {
         _renderTime += elapsed;
-        Main.setHTML("status", elapsed + " : " + frameCount + " : " + Math.ceil(_renderTime / frameCount));
+        Main.setHTML("status", elapsed + " : " + frameCount + " : " + Math.ceil(_renderTime / frameCount) + " : " + frameInterval.toFixed(2));
       }
 
       if (!Main.isPaused() && _counter % 16 == 0) {
@@ -272,48 +344,82 @@ var Main = function () {
       invisi.classList.add("active");
     },
 
-    setMode: function (mode_str) {
-      let modeVal = 68;
-      if (mode_str == "4C") {
-        modeVal = 4;
+    updateNavMode: function (modeVal) {
+      var nav = document.getElementById("nav-container");
+      if (!nav) {
+        return;
       }
-      else if (mode_str == "Bu") {
-        modeVal = 66;
+      _modeCssClasses.forEach(function (modeClass) {
+        nav.classList.remove(modeClass);
+      });
+
+      const cssClass = {
+        4: "mode-4c",
+        66: "mode-bu",
+        67: "mode-bm",
+        68: "mode-b",
+        69: "mode-5x5",
+        70: "mode-5x5d",
+      }[modeVal];
+      if (cssClass) {
+        nav.classList.add(cssClass);
       }
-      else if (mode_str == "Bm") {
-        modeVal = 67;
-      }
+    },
+
+    setMode: function (modeInput, fromProfile) {
+      const modeVal = resolveModeValue(modeInput);
       Module._cimbare_configure(modeVal, -1);
+      _selectedMode = Module._cimbare_get_mode();
+      _protocolVersion = Module._cimbare_get_protocol_version();
+      if (!fromProfile) {
+        _profile = "manual";
+      }
       _idealRatio = Module._cimbare_get_aspect_ratio();
       Main.resize();
+      Main.updateNavMode(_selectedMode);
+      Main.publishProtocolMetadata(0, 0);
+    },
 
+    setProfile: function (profileName) {
+      const profile = _profiles[profileName];
+      if (!profile) {
+        return;
+      }
+      _profile = profileName;
+      _colorBalance = profile.colorBalance;
+      Main.setFPS(profile.fps);
+      Main.setMode(profile.mode, true);
+      Main.publishProtocolMetadata(0, 0);
+    },
+
+    publishProtocolMetadata: function (frameCount, frameInterval) {
+      const selectedModeName = modeLabel(_selectedMode);
+      const metadata = {
+        protocolVersion: _protocolVersion,
+        profile: _profile,
+        mode: _selectedMode,
+        modeName: selectedModeName,
+        frameCounter: _counter,
+        frameCount: frameCount || 0,
+        frameIntervalMs: frameInterval || 0,
+        syncEvery: _syncEvery,
+        isReferenceFrame: _counter > 0 && (_counter % _syncEvery === 0),
+        experimentalMode: _selectedMode >= 69,
+      };
+
+      window.CIMBAR_PROTOCOL_METADATA = metadata;
       var nav = document.getElementById("nav-container");
-      if (modeVal == 4) {
-        nav.classList.remove("mode-b");
-        nav.classList.add("mode-4c");
-        nav.classList.remove("mode-b");
-        nav.classList.remove("mode-bm");
-        nav.classList.remove("mode-bu");
-      } else if (modeVal == 66) {
-        nav.classList.add("mode-bu");
-        nav.classList.remove("mode-b");
-        nav.classList.remove("mode-bm");
-        nav.classList.remove("mode-4c");
-      } else if (modeVal == 67) {
-        nav.classList.add("mode-bm");
-        nav.classList.remove("mode-b");
-        nav.classList.remove("mode-bu");
-        nav.classList.remove("mode-4c");
-      } else if (modeVal == 68) {
-        nav.classList.add("mode-b");
-        nav.classList.remove("mode-bm");
-        nav.classList.remove("mode-bu");
-        nav.classList.remove("mode-4c");
-      } else {
-        nav.classList.remove("mode-b");
-        nav.classList.remove("mode-bm");
-        nav.classList.remove("mode-bu");
-        nav.classList.remove("mode-4c");
+      if (nav) {
+        nav.dataset.protocolVersion = String(metadata.protocolVersion);
+        nav.dataset.profile = String(metadata.profile);
+        nav.dataset.mode = String(metadata.mode);
+        nav.dataset.modeName = String(metadata.modeName);
+        nav.dataset.frameCounter = String(metadata.frameCounter);
+        nav.dataset.frameCount = String(metadata.frameCount);
+        nav.dataset.frameIntervalMs = metadata.frameIntervalMs.toFixed(2);
+        nav.dataset.syncEvery = String(metadata.syncEvery);
+        nav.dataset.referenceFrame = metadata.isReferenceFrame ? "1" : "0";
+        nav.dataset.experimentalMode = metadata.experimentalMode ? "1" : "0";
       }
     },
 

@@ -42,7 +42,7 @@ int main(int argc, char** argv)
 		("c,colorbits", "Color bits. [0-3]", cxxopts::value<int>()->default_value(turbo::str::str(colorBits)))
 		("e,ecc", "ECC level", cxxopts::value<unsigned>()->default_value(turbo::str::str(ecc)))
 		("f,fps", "Target FPS", cxxopts::value<unsigned>()->default_value(turbo::str::str(defaultFps)))
-		("m,mode", "Select a cimbar mode. B is new to 0.6.x. 4C is the 0.5.x config. [B,Bm,Bu,4C]", cxxopts::value<string>()->default_value("4C"))
+		("m,mode", "Select a cimbar mode. [B,Bm,Bu,5x5,5x5d,4C]", cxxopts::value<string>()->default_value("4C"))
 		("z,compression", "Compression level. 0 == no compression.", cxxopts::value<int>()->default_value(turbo::str::str(compressionLevel)))
 		("h,help", "Print usage")
 	;
@@ -73,6 +73,10 @@ int main(int argc, char** argv)
 			config_mode = 66;
 		else if (mode == "Bm" or mode == "BM")
 			config_mode = 67;
+		else if (mode == "5x5" or mode == "5X5")
+			config_mode = 69;
+		else if (mode == "5x5d" or mode == "5X5D")
+			config_mode = 70;
 	}
 
 	unsigned fps = result["fps"].as<unsigned>();

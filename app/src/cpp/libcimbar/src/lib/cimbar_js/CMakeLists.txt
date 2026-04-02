@@ -60,6 +60,8 @@ set (LINK_WASM_EXPORTED_FUNCTIONS
 	, "_cimbare_configure"
 	, "_cimbare_rotate_window"
 	, "_cimbare_get_aspect_ratio"
+	, "_cimbare_get_mode"
+	, "_cimbare_get_protocol_version"
 )
 
 if(NOT USE_WASM EQUAL "2")

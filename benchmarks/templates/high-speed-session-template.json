@@ -1,0 +1,23 @@
+{
+  "device": {
+    "model": "",
+    "camera_id": "",
+    "supports_constrained_high_speed_video": true
+  },
+  "session": {
+    "sender_profile": "",
+    "receiver_profile": "throughput",
+    "target_fps": 0,
+    "high_speed_session_enabled": false
+  },
+  "metrics": {
+    "preview_fps": 0,
+    "goodput_kbps": 0,
+    "time_to_first_chunk_ms": 0,
+    "avg_backlog": 0
+  },
+  "decision": {
+    "keep_isolated": true,
+    "notes": ""
+  }
+}

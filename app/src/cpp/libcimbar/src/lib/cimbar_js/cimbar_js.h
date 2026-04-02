@@ -15,6 +15,8 @@ int cimbare_encode_bufsize();
 int cimbare_encode(const unsigned char* buffer, unsigned size);
 int cimbare_configure(int mode_val, int compression);
 float cimbare_get_aspect_ratio();
+int cimbare_get_mode();
+int cimbare_get_protocol_version();
 
 // internal usage
 bool cimbare_auto_scale_window();

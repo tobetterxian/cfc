@@ -44,7 +44,7 @@ int main(int argc, char** argv)
 		("i,in", "Video source.", cxxopts::value<string>())
 		("o,out", "Output directory (decoding).", cxxopts::value<string>())
 		("f,fps", "Target decode FPS", cxxopts::value<unsigned>()->default_value(turbo::str::str(defaultFps)))
-		("m,mode", "Select a cimbar mode. B (the default) is new to 0.6.x. 4C is the 0.5.x config. [B,Bm,Bu,4C]", cxxopts::value<string>()->default_value("B"))
+		("m,mode", "Select a cimbar mode. [B,Bm,Bu,5x5,5x5d,4C]", cxxopts::value<string>()->default_value("B"))
 		("h,help", "Print usage")
 	;
 	options.show_positional_help();
@@ -71,6 +71,10 @@ int main(int argc, char** argv)
 			config_mode = 66;
 		else if (mode == "Bm" or mode == "BM")
 			config_mode = 67;
+		else if (mode == "5x5" or mode == "5X5")
+			config_mode = 69;
+		else if (mode == "5x5d" or mode == "5X5D")
+			config_mode = 70;
 	}
 
 	unsigned fps = result["fps"].as<unsigned>();
