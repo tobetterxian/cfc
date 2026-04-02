@@ -43,6 +43,57 @@ namespace {
 		return (num * 100) / denom;
 	}
 
+	void reset_session_state()
+	{
+		_completed.clear();
+		_calls = 0;
+		_transferStatus = 0;
+		_frameDecodeSnapshot = 0;
+		_frameSuccessSnapshot = 0;
+		MultiThreadedDecoder::count = 0;
+		MultiThreadedDecoder::bytes = 0;
+		MultiThreadedDecoder::perfect = 0;
+		MultiThreadedDecoder::decoded = 0;
+		MultiThreadedDecoder::decodeTicks = 0;
+		MultiThreadedDecoder::scanned = 0;
+		MultiThreadedDecoder::scanTicks = 0;
+		MultiThreadedDecoder::extractTicks = 0;
+	}
+
+	std::string telemetry_snapshot(const std::shared_ptr<MultiThreadedDecoder>& proc)
+	{
+		unsigned backlog = 0;
+		int mode = 0;
+		int detectedMode = 0;
+		unsigned filesInFlight = 0;
+		unsigned filesDecoded = 0;
+
+		if (proc)
+		{
+			backlog = proc->backlog();
+			mode = proc->mode();
+			detectedMode = proc->detected_mode();
+			filesInFlight = proc->files_in_flight();
+			filesDecoded = proc->files_decoded();
+		}
+
+		std::stringstream stream;
+		stream << _calls << '|'
+		       << MultiThreadedDecoder::scanned << '|'
+		       << MultiThreadedDecoder::decoded << '|'
+		       << MultiThreadedDecoder::perfect << '|'
+		       << MultiThreadedDecoder::bytes << '|'
+		       << millis(MultiThreadedDecoder::scanTicks, MultiThreadedDecoder::scanned) << '|'
+		       << millis(MultiThreadedDecoder::extractTicks, MultiThreadedDecoder::decoded) << '|'
+		       << millis(MultiThreadedDecoder::decodeTicks, MultiThreadedDecoder::decoded) << '|'
+		       << backlog << '|'
+		       << mode << '|'
+		       << detectedMode << '|'
+		       << filesInFlight << '|'
+		       << filesDecoded;
+		return stream.str();
+	}
+
 	void drawGuidance(cv::Mat& mat, int in_progress)
 	{
 		int minsz = std::min(mat.cols, mat.rows);
@@ -218,6 +269,14 @@ Java_org_cimbar_camerafilecopy_MainActivity_processImageJNI(JNIEnv *env, jobject
 	return env->NewStringUTF(result.c_str());
 }
 
+jstring JNICALL
+Java_org_cimbar_camerafilecopy_MainActivity_getDecoderTelemetryJNI(JNIEnv *env, jobject instance)
+{
+	std::lock_guard<std::mutex> lock(_mutex);
+	std::string snapshot = telemetry_snapshot(_proc);
+	return env->NewStringUTF(snapshot.c_str());
+}
+
 void JNICALL
 Java_org_cimbar_camerafilecopy_MainActivity_shutdownJNI(JNIEnv *env, jobject instance) {
 	__android_log_print(ANDROID_LOG_INFO, TAG, "Shutdown cfc-cpp\n");
@@ -226,6 +285,7 @@ Java_org_cimbar_camerafilecopy_MainActivity_shutdownJNI(JNIEnv *env, jobject ins
 	if (_proc)
 		_proc->stop();
 	_proc = nullptr;
+	reset_session_state();
 }
 
 }

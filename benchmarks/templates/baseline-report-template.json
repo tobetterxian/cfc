@@ -1,0 +1,29 @@
+{
+  "report_name": "baseline-template",
+  "device": {
+    "model": "",
+    "android_version": "",
+    "capture_profile": ""
+  },
+  "scenario": {
+    "name": "",
+    "lighting": "",
+    "distance_cm": 0,
+    "angle_deg": 0,
+    "screen_brightness_percent": 0
+  },
+  "metrics": {
+    "goodput_kbps": 0,
+    "time_to_first_chunk_ms": 0,
+    "time_to_complete_file_ms": 0,
+    "scan_success_ratio": 0,
+    "decode_success_ratio": 0,
+    "avg_backlog": 0,
+    "perfect_frame_ratio": 0
+  },
+  "artifacts": {
+    "frames_csv": "",
+    "summary_json": ""
+  },
+  "notes": ""
+}

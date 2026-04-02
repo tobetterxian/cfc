@@ -6,6 +6,7 @@ import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
+import android.os.SystemClock;
 
 import androidx.annotation.Nullable;
 import androidx.core.app.ActivityCompat;
@@ -31,6 +32,7 @@ import org.opencv.core.Mat;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 
@@ -48,6 +50,7 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
     private int detectedMode = 68;
     private String dataPath;
     private String activePath;
+    private SessionLogWriter sessionLogger;
 
     private BaseLoaderCallback mLoaderCallback = new BaseLoaderCallback(this) {
         @Override
@@ -84,6 +87,7 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
         //this.dataPath = this.getExternalFilesDir(null).getPath(); // for manual testing
 
         setContentView(R.layout.activity_main);
+        ensureSessionLogger();
         mOpenCvCameraView = findViewById(R.id.main_surface);
         mOpenCvCameraView.setVisibility(SurfaceView.VISIBLE);
         mOpenCvCameraView.setCvCameraViewListener(this);
@@ -132,6 +136,7 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
 
     @Override
     public void onPause() {
+        closeSessionLogger();
         shutdownJNI();
         super.onPause();
         if (mOpenCvCameraView != null)
@@ -141,6 +146,7 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
     @Override
     public void onResume() {
         super.onResume();
+        ensureSessionLogger();
         if (!OpenCVLoader.initDebug()) {
             Log.d(TAG, "Internal OpenCV library not found. Using OpenCV Manager for initialization");
             OpenCVLoader.initAsync(OpenCVLoader.OPENCV_VERSION, this, mLoaderCallback);
@@ -152,6 +158,7 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
 
     @Override
     public void onDestroy() {
+        closeSessionLogger();
         shutdownJNI();
         super.onDestroy();
         if (mOpenCvCameraView != null)
@@ -168,11 +175,17 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
 
     @Override
     public Mat onCameraFrame(CvCameraViewFrame frame) {
+        long frameStartedNs = SystemClock.elapsedRealtimeNanos();
         // get current camera frame as OpenCV Mat object
         Mat mat = frame.rgba();
 
         // native call to process current camera frame
         String res = processImageJNI(mat.getNativeObjAddr(), this.dataPath, this.modeVal);
+        NativeTelemetrySnapshot telemetry = NativeTelemetrySnapshot.fromWireString(getDecoderTelemetryJNI());
+        long frameFinishedNs = SystemClock.elapsedRealtimeNanos();
+        if (sessionLogger != null) {
+            sessionLogger.logFrame(frameStartedNs, frameFinishedNs, modeVal, detectedMode, res, telemetry);
+        }
 
         // res will contain a file path if we completed a transfer. Ask the user where to save it
         if (res.startsWith("/")) {
@@ -211,6 +224,30 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
         return mat;
     }
 
+    private void ensureSessionLogger() {
+        if (sessionLogger != null) {
+            return;
+        }
+        try {
+            sessionLogger = SessionLogWriter.open(this);
+        } catch (IOException e) {
+            Log.e(TAG, "Failed to create session logger", e);
+        }
+    }
+
+    private void closeSessionLogger() {
+        if (sessionLogger == null) {
+            return;
+        }
+        try {
+            sessionLogger.updateLastSnapshot(NativeTelemetrySnapshot.fromWireString(getDecoderTelemetryJNI()));
+        } catch (UnsatisfiedLinkError e) {
+            Log.w(TAG, "Native telemetry unavailable while closing session", e);
+        }
+        sessionLogger.closeQuietly();
+        sessionLogger = null;
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
         if (resultCode == RESULT_OK && requestCode == CREATE_FILE) {
@@ -240,6 +277,7 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
     }
 
     private native String processImageJNI(long mat, String path, int modeInt);
+    private native String getDecoderTelemetryJNI();
     private native void shutdownJNI();
 
     @Override
