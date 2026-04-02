@@ -1,8 +1,7 @@
 /* This code is subject to the terms of the Mozilla Public License, v.2.0. http://mozilla.org/MPL/2.0/. */
 #pragma once
 
-#include <GLES3/gl3.h>
-#include <GLES2/gl2ext.h>
+#include "gl_headers.h"
 #include <iostream>
 #include <string>
 
@@ -25,6 +24,11 @@ public:
 	operator GLuint() const
 	{
 		return _p;
+	}
+
+	bool good() const
+	{
+		return _p != 0;
 	}
 
 protected:

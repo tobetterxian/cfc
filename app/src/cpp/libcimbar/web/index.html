@@ -77,6 +77,10 @@
       content: "⌜ Error! WebGL is not enabled :( ⌟";
     }
 
+    .dragdrop.compat:before {
+      content: "⌜ WebGL1 compatibility mode ⌟";
+    }
+
     #invisible_click {
       position: fixed;
       opacity: 0;
@@ -369,11 +373,11 @@
         </li>
         <li class="modesel">
           <h4>Profile</h4>
-          <a href="javascript:void(0)" onclick="Main.setProfile('R1')">R1</a>
-          <a href="javascript:void(0)" onclick="Main.setProfile('R2')">R2</a>
-          <a href="javascript:void(0)" onclick="Main.setProfile('R3')">R3</a>
-          <a href="javascript:void(0)" onclick="Main.setProfile('X1')">X1</a>
-          <a href="javascript:void(0)" onclick="Main.setProfile('X2')">X2</a>
+          <a class="profile-r1" href="javascript:void(0)" onclick="Main.setProfile('R1')">R1</a>
+          <a class="profile-r2" href="javascript:void(0)" onclick="Main.setProfile('R2')">R2</a>
+          <a class="profile-r3" href="javascript:void(0)" onclick="Main.setProfile('R3')">R3</a>
+          <a class="profile-x1" href="javascript:void(0)" onclick="Main.setProfile('X1')">X1</a>
+          <a class="profile-x2" href="javascript:void(0)" onclick="Main.setProfile('X2')">X2</a>
         </li>
         <li>
           <h4>Framerate</h4>
@@ -393,9 +397,101 @@
     }
     var canvas = document.getElementById('canvas');
 
-    var Module = {};
-    Module.canvas = canvas;
+    function detectSenderContext() {
+      var probe = document.createElement("canvas");
+      var options = {
+        alpha: false,
+        antialias: false,
+        depth: true,
+        stencil: false,
+        premultipliedAlpha: false,
+        preserveDrawingBuffer: false,
+        powerPreference: "high-performance",
+      };
+      var attempts = [
+        { name: "webgl2", version: 2 },
+        { name: "webgl", version: 1 },
+        { name: "experimental-webgl", version: 1 },
+      ];
+
+      for (var i = 0; i < attempts.length; i++) {
+        try {
+          var context = probe.getContext(attempts[i].name, options);
+          if (context) {
+            return {
+              name: attempts[i].name,
+              version: attempts[i].version,
+            };
+          }
+        } catch (err) {
+        }
+      }
+
+      return { name: "none", version: 0 };
+    }
+
+    function patchBrowserCreateContext(preferredVersion) {
+      if (!preferredVersion || typeof Browser === "undefined" || typeof Browser.createContext !== "function") {
+        return;
+      }
+      if (Browser.createContext.__cimbarWrapped) {
+        return;
+      }
+
+      var originalCreateContext = Browser.createContext;
+      var wrappedCreateContext = function (target, useWebGL, setInModule, webGLContextAttributes) {
+        var contextAttributes = webGLContextAttributes || {};
+        if (useWebGL) {
+          contextAttributes = Object.assign({}, contextAttributes, {
+            majorVersion: preferredVersion,
+          });
+          if (!Object.prototype.hasOwnProperty.call(contextAttributes, "minorVersion")) {
+            contextAttributes.minorVersion = 0;
+          }
+        }
+        return originalCreateContext.call(Browser, target, useWebGL, setInModule, contextAttributes);
+      };
+      wrappedCreateContext.__cimbarWrapped = true;
+      Browser.createContext = wrappedCreateContext;
+    }
+
+    function patchLegacySenderRuntime() {
+      if (typeof Module._cimbare_configure === "function" && typeof Module._cimbare_get_mode !== "function") {
+        var originalConfigure = Module._cimbare_configure;
+        var lastMode = 68;
+        Module._cimbare_configure = function (modeVal, compression) {
+          lastMode = modeVal;
+          return originalConfigure(modeVal, compression);
+        };
+        Module._cimbare_get_mode = function () {
+          return lastMode;
+        };
+      }
+
+      if (typeof Module._cimbare_get_protocol_version !== "function") {
+        Module._cimbare_get_protocol_version = function () {
+          return 1;
+        };
+      }
+    }
+
+    var senderContext = detectSenderContext();
+    if (!senderContext.version) {
+      document.getElementById('dragdrop').classList.add('error');
+    } else if (senderContext.version < 2) {
+      document.getElementById('dragdrop').classList.add('compat');
+    }
+
+    var Module = {
+      canvas: canvas,
+      cimbarPreferredWebGLVersion: senderContext.version,
+      onAbort: function () {
+        document.getElementById('dragdrop').classList.add('error');
+      },
+    };
     Module.onRuntimeInitialized = () => {
+      patchBrowserCreateContext(senderContext.version);
+      patchLegacySenderRuntime();
       Main.init(canvas);
       Main.nextFrame();
     };

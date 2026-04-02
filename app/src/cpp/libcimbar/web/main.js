@@ -16,6 +16,8 @@ var Main = function () {
   var _protocolVersion = 1;
   var _syncEvery = 32;
   var _profile = "R2";
+  var _glContext = "none";
+  var _glVersion = 0;
   var _modeLabels = {
     4: "4C",
     66: "Bu",
@@ -133,19 +135,63 @@ var Main = function () {
     return _modeLabels[modeVal] || String(modeVal);
   }
 
+  function supportsExtendedSenderRuntime() {
+    return typeof Module._cimbare_get_mode === "function" &&
+      typeof Module._cimbare_get_protocol_version === "function";
+  }
+
+  function sanitizeModeForRuntime(modeVal) {
+    if (modeVal >= 69 && !supportsExtendedSenderRuntime()) {
+      return 68;
+    }
+    return modeVal;
+  }
+
+  function updateCapabilityUI() {
+    if (supportsExtendedSenderRuntime()) {
+      return;
+    }
+
+    document.querySelectorAll(".mode-5x5, .mode-5x5d, .profile-x1, .profile-x2").forEach(function (node) {
+      node.style.display = "none";
+    });
+  }
+
+  function updateRendererUI(isReady, isCompatibilityMode) {
+    var elem = document.getElementById("dragdrop");
+    if (!elem) {
+      return;
+    }
+
+    elem.classList.toggle("error", !isReady);
+    elem.classList.toggle("compat", !!isCompatibilityMode);
+  }
+
   // public interface
   return {
     init: function (canvas) {
+      updateCapabilityUI();
+      if (!Main.check_GL_enabled(canvas)) {
+        Main.publishProtocolMetadata(0, 0);
+        return;
+      }
       Main.setProfile(_profile);
-      Main.check_GL_enabled(canvas);
       Main.publishProtocolMetadata(0, 0);
     },
 
     check_GL_enabled: function (canvas) {
-      if (canvas.getContext("2d")) {
-        var elem = document.getElementById('dragdrop');
-        elem.classList.add("error");
+      var preferredVersion = Number(Module.cimbarPreferredWebGLVersion || 0);
+      if (!preferredVersion) {
+        _glContext = "none";
+        _glVersion = 0;
+        updateRendererUI(false, false);
+        return false;
       }
+
+      _glContext = preferredVersion >= 2 ? "webgl2" : "webgl";
+      _glVersion = preferredVersion >= 2 ? 2 : 1;
+      updateRendererUI(true, _glVersion < 2);
+      return true;
     },
 
     resize: function () {
@@ -367,10 +413,10 @@ var Main = function () {
     },
 
     setMode: function (modeInput, fromProfile) {
-      const modeVal = resolveModeValue(modeInput);
+      const modeVal = sanitizeModeForRuntime(resolveModeValue(modeInput));
       Module._cimbare_configure(modeVal, -1);
-      _selectedMode = Module._cimbare_get_mode();
-      _protocolVersion = Module._cimbare_get_protocol_version();
+      _selectedMode = typeof Module._cimbare_get_mode === "function" ? Module._cimbare_get_mode() : modeVal;
+      _protocolVersion = typeof Module._cimbare_get_protocol_version === "function" ? Module._cimbare_get_protocol_version() : 0;
       if (!fromProfile) {
         _profile = "manual";
       }
@@ -404,7 +450,9 @@ var Main = function () {
         frameIntervalMs: frameInterval || 0,
         syncEvery: _syncEvery,
         isReferenceFrame: _counter > 0 && (_counter % _syncEvery === 0),
-        experimentalMode: _selectedMode >= 69,
+        experimentalMode: supportsExtendedSenderRuntime() && _selectedMode >= 69,
+        glContext: _glContext,
+        glVersion: _glVersion,
       };
 
       window.CIMBAR_PROTOCOL_METADATA = metadata;
@@ -420,6 +468,8 @@ var Main = function () {
         nav.dataset.syncEvery = String(metadata.syncEvery);
         nav.dataset.referenceFrame = metadata.isReferenceFrame ? "1" : "0";
         nav.dataset.experimentalMode = metadata.experimentalMode ? "1" : "0";
+        nav.dataset.glContext = String(metadata.glContext);
+        nav.dataset.glVersion = String(metadata.glVersion);
       }
     },
 

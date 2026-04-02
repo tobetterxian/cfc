@@ -24,8 +24,8 @@ def main():
     main_js = read_script('main_js')
     cimbar_js = read_script('cimbar_js')
 
-    contents = contents.replace('<script src="main.js">', main_js)
-    contents = contents.replace('<script src="cimbar_js.js">', cimbar_js)
+    contents = contents.replace('<script src="main.js"></script>', main_js)
+    contents = contents.replace('<script src="cimbar_js.js"></script>', cimbar_js)
 
     with open(get_path('output'), 'wt') as f:
         f.write(contents)

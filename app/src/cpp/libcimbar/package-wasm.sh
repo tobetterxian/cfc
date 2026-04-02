@@ -3,20 +3,26 @@
 
 SKIP_JS=${SKIP_JS:-}
 CIMBAR_ROOT=${CIMBAR_ROOT:-/usr/src/app}
+OPENCV_DIR=${OPENCV_DIR:-$CIMBAR_ROOT/opencv4}
+EMSCRIPTEN_DIR=${EMSCRIPTEN_DIR:-/emsdk/upstream/emscripten}
 cd $CIMBAR_ROOT
 
 apt update
-apt install python3 -y
+apt install python3 git -y
 
-cd opencv4/
-mkdir opencv-build-wasm
+if [ ! -d "$OPENCV_DIR" ]; then
+	git clone --depth 1 --branch 4.10.0 https://github.com/opencv/opencv.git "$OPENCV_DIR"
+fi
+
+cd "$OPENCV_DIR"
+mkdir -p opencv-build-wasm
 cd opencv-build-wasm
-python3 ../platforms/js/build_js.py build_wasm --emscripten_dir=/emsdk/upstream/emscripten
+python3 ../platforms/js/build_js.py build_wasm --build_wasm --emscripten_dir="$EMSCRIPTEN_DIR"
 
 cd $CIMBAR_ROOT
-mkdir build-wasm
+mkdir -p build-wasm
 cd build-wasm
-emcmake cmake .. -DUSE_WASM=1 -DOPENCV_DIR=$CIMBAR_ROOT/opencv4
+emcmake cmake .. -DUSE_WASM=1 -DOPENCV_DIR="$OPENCV_DIR"
 make -j5 install
 (cd ../web/ && bash wasmgz.sh)
 
@@ -26,9 +32,9 @@ if [ -n "$SKIP_JS" ]; then
 fi
 
 cd $CIMBAR_ROOT
-mkdir build-asmjs
+mkdir -p build-asmjs
 cd build-asmjs
-emcmake cmake .. -DUSE_WASM=2 -DOPENCV_DIR=$CIMBAR_ROOT/opencv4
+emcmake cmake .. -DUSE_WASM=2 -DOPENCV_DIR="$OPENCV_DIR"
 make -j5 install
 (cd ../web/ && zip cimbar.asmjs.zip cimbar_js.js index.html main.js)
 

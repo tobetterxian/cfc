@@ -1,13 +1,30 @@
+import java.util.Properties
+
 apply plugin: 'com.android.application'
+
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withInputStream { stream ->
+        localProperties.load(stream)
+    }
+}
+
+def resolvedOpenCvSdk = localProperties.getProperty("opencvsdk") ?: project.findProperty("opencvsdk")
+if (!resolvedOpenCvSdk) {
+    throw new GradleException("Missing opencvsdk. Set it in local.properties or gradle.properties.")
+}
+
+def cimbarSenderHtmlSource = file("src/cpp/libcimbar/web/cimbar_js.html")
+def cimbarSenderHtmlAsset = file("src/main/assets/cimbar_js.html")
 
 android {
     compileSdkVersion 34
-    buildToolsVersion "30.0.3"
-    ndkVersion "25.2.9519653"
+    ndkVersion "27.1.12297006"
     defaultConfig {
         applicationId "org.cimbar.camerafilecopy"
         minSdkVersion 21
-        targetSdkVersion 35
+        targetSdkVersion 34
         versionCode 23
         versionName "0.6.4f"
         testInstrumentationRunner "android.support.test.runner.AndroidJUnitRunner"
@@ -19,7 +36,7 @@ android {
                 //arguments "-DCMAKE_BUILD_TYPE=Release"
                 cppFlags "-frtti -fexceptions -std=c++17"
                 abiFilters 'arm64-v8a'
-                arguments "-DOpenCV_DIR=" + opencvsdk + "/sdk/native"
+                arguments "-DOpenCV_DIR=" + resolvedOpenCvSdk + "/sdk/native"
             }
         }
         setProperty("archivesBaseName", "CameraFileCopy")
@@ -33,7 +50,7 @@ android {
     externalNativeBuild {
         cmake {
             path "src/cpp/CMakeLists.txt"
-            version "3.16.3+"
+            version "3.22.1"
         }
     }
 }
@@ -45,8 +62,29 @@ dependencies {
     implementation project(path: ':opencv')
 }
 
+tasks.register("syncCimbarSenderHtml") {
+    inputs.file(cimbarSenderHtmlSource)
+    outputs.file(cimbarSenderHtmlAsset)
+
+    doLast {
+        if (!cimbarSenderHtmlSource.exists()) {
+            throw new GradleException("Missing generated sender HTML at " + cimbarSenderHtmlSource)
+        }
+        copy {
+            from(cimbarSenderHtmlSource)
+            into(cimbarSenderHtmlAsset.parentFile)
+            rename { "cimbar_js.html" }
+        }
+    }
+}
+
+preBuild.dependsOn(tasks.named("syncCimbarSenderHtml"))
+
 preBuild.doFirst {
-    if (!file("src/main/assets/cimbar_js.html").exists()) {
+    if (!file(resolvedOpenCvSdk + "/sdk/native").exists()) {
+        throw new GradleException("Missing OpenCV Android SDK. Set opencvsdk to the extracted OpenCV-android-sdk path.")
+    }
+    if (!file("src/main/assets").exists()) {
         throw new GradleException("Missing cimbar-js-bits submodule?")
     }
 }
