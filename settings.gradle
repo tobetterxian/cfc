@@ -1,5 +1,23 @@
+import java.util.Properties
+
+def localProperties = new Properties()
+def localPropertiesFile = new File(settingsDir, "local.properties")
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withInputStream { stream ->
+        localProperties.load(stream)
+    }
+}
+
+def resolvedOpenCvSdk = localProperties.getProperty("opencvsdk")
+if (!resolvedOpenCvSdk && settings.hasProperty("opencvsdk")) {
+    resolvedOpenCvSdk = settings.opencvsdk
+}
+if (!resolvedOpenCvSdk) {
+    throw new GradleException("Missing opencvsdk. Set it in local.properties or gradle.properties.")
+}
+
 rootProject.name='CameraFileCopy'
 include ':app'
 
 include ':opencv'
-project(':opencv').projectDir = new File(opencvsdk + '/sdk')
+project(':opencv').projectDir = new File(resolvedOpenCvSdk + '/sdk')

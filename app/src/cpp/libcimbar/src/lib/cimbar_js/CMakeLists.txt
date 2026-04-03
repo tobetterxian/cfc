@@ -44,53 +44,55 @@ target_link_libraries(cimbar_js
 
 # asm.js vs wasm
 if(USE_WASM EQUAL "2")
-	set (LINK_WASM_OPT "-s SINGLE_FILE=1")
+	set (LINK_WASM_OPT "SINGLE_FILE=1")
 else()
-	set (LINK_WASM_OPT "-s WASM=1")
+	set (LINK_WASM_OPT "WASM=1")
 endif()
 
 set (LINK_WASM_EXPORTED_FUNCTIONS
 	"_malloc"
-	, "_free"
-	, "_cimbare_render"
-	, "_cimbare_next_frame"
-	, "_cimbare_init_encode"
-	, "_cimbare_encode"
-	, "_cimbare_encode_bufsize"
-	, "_cimbare_configure"
-	, "_cimbare_rotate_window"
-	, "_cimbare_get_aspect_ratio"
-	, "_cimbare_get_mode"
-	, "_cimbare_get_protocol_version"
+	"_free"
+	"_cimbare_render"
+	"_cimbare_next_frame"
+	"_cimbare_init_encode"
+	"_cimbare_encode"
+	"_cimbare_encode_bufsize"
+	"_cimbare_configure"
+	"_cimbare_rotate_window"
+	"_cimbare_get_aspect_ratio"
+	"_cimbare_get_mode"
+	"_cimbare_get_protocol_version"
 )
 
 if(NOT USE_WASM EQUAL "2")
 set(LINK_WASM_EXPORTED_FUNCTIONS
 	${LINK_WASM_EXPORTED_FUNCTIONS}
 
-	, "_cimbard_get_report"
-	, "_cimbard_get_bufsize"
-	, "_cimbard_scan_extract_decode"
-	, "_cimbard_fountain_decode"
-	, "_cimbard_get_filesize"
-	, "_cimbard_get_filename"
-	, "_cimbard_get_decompress_bufsize"
-	, "_cimbard_decompress_read"
-	, "_cimbard_configure_decode"
+	"_cimbard_get_report"
+	"_cimbard_get_bufsize"
+	"_cimbard_scan_extract_decode"
+	"_cimbard_fountain_decode"
+	"_cimbard_get_filesize"
+	"_cimbard_get_filename"
+	"_cimbard_get_decompress_bufsize"
+	"_cimbard_decompress_read"
+	"_cimbard_configure_decode"
 )
 endif()
+
+string(REPLACE ";" "," LINK_WASM_EXPORTED_FUNCTIONS_JSON "${LINK_WASM_EXPORTED_FUNCTIONS}")
 
 # extra link flags for emscripten
 set (LINK_WASM_LIST
 	--bind -Os
-	${LINK_WASM_OPT}
-	-s MIN_WEBGL_VERSION=1
-	-s MAX_WEBGL_VERSION=2
-	-s USE_GLFW=3
-	-s WASM_BIGINT=1
-	-s FILESYSTEM=0
-	-s TOTAL_MEMORY=134217728
-	-s EXPORTED_FUNCTIONS='[${LINK_WASM_EXPORTED_FUNCTIONS}]'
+	"-s${LINK_WASM_OPT}"
+	-sMIN_WEBGL_VERSION=1
+	-sMAX_WEBGL_VERSION=2
+	-sUSE_GLFW=3
+	-sWASM_BIGINT=1
+	-sFILESYSTEM=0
+	-sTOTAL_MEMORY=134217728
+	"-sEXPORTED_FUNCTIONS=[${LINK_WASM_EXPORTED_FUNCTIONS_JSON}]"
 )
 string(REPLACE ";" " " LINK_WASM_FLAGS "${LINK_WASM_LIST}")
 
