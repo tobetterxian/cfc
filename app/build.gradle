@@ -17,6 +17,8 @@ if (!resolvedOpenCvSdk) {
 
 def cimbarSenderHtmlSource = file("src/cpp/libcimbar/web/cimbar_js.html")
 def cimbarSenderHtmlAsset = file("src/main/assets/cimbar_js.html")
+def cimbarSenderBuildScript = file("src/cpp/libcimbar/build-sender-single.py")
+def resolvedPythonExecutable = localProperties.getProperty("python") ?: project.findProperty("python") ?: "python"
 
 android {
     compileSdkVersion 34
@@ -63,6 +65,8 @@ dependencies {
 }
 
 tasks.register("syncCimbarSenderHtml") {
+    dependsOn(tasks.named("generateCimbarSenderHtml"))
+
     inputs.file(cimbarSenderHtmlSource)
     outputs.file(cimbarSenderHtmlAsset)
 
@@ -78,6 +82,21 @@ tasks.register("syncCimbarSenderHtml") {
     }
 }
 
+tasks.register("generateCimbarSenderHtml", Exec) {
+    inputs.file(cimbarSenderBuildScript)
+    inputs.file(file("src/cpp/libcimbar/package-cimbar-html.py"))
+    inputs.file(file("src/cpp/libcimbar/CMakeLists.txt"))
+    inputs.file(file("src/cpp/libcimbar/src/lib/cimbar_js/CMakeLists.txt"))
+    inputs.files(fileTree("src/cpp/libcimbar/src"))
+    inputs.files(fileTree("src/cpp/libcimbar/web") {
+        include "index.html", "main.js", "cimbar_js.wasm"
+    })
+    outputs.file(cimbarSenderHtmlSource)
+
+    workingDir rootProject.projectDir
+    commandLine resolvedPythonExecutable, cimbarSenderBuildScript.absolutePath
+}
+
 preBuild.dependsOn(tasks.named("syncCimbarSenderHtml"))
 
 preBuild.doFirst {
@@ -86,6 +105,9 @@ preBuild.doFirst {
     }
     if (!file("src/main/assets").exists()) {
         throw new GradleException("Missing cimbar-js-bits submodule?")
+    }
+    if (!cimbarSenderBuildScript.exists()) {
+        throw new GradleException("Missing sender build script at " + cimbarSenderBuildScript)
     }
 }
 

@@ -13,3 +13,5 @@
 .externalNativeBuild
 .cxx
 .idea/
+app/src/cpp/libcimbar/build-sender-single/
+app/src/cpp/libcimbar/__pycache__/
