@@ -342,6 +342,26 @@
       width: 100%;
     }
 
+    #framerate-value {
+      font-size: 1.4em;
+      font-weight: 700;
+      color: #00ffff;
+    }
+
+    #framerate-detail {
+      margin-top: 0.35em;
+      color: #9fa6b2;
+      font-size: 0.95em;
+    }
+
+    #framerate-select {
+      background: #1f232b;
+      border: 1px solid #444;
+      color: #fff;
+      padding: 0.45em;
+      border-radius: 6px;
+    }
+
     #nav-container:focus-within #nav-content {
       transform: none;
     }
@@ -395,7 +415,19 @@
         </li>
         <li>
           <h4>Framerate</h4>
-          <input type="range" class="range" min="5" max="20" step="5" value="15" oninput="Main.setFPS(this.value)"
+          <div id="framerate-value">15 fps</div>
+          <div id="framerate-detail">15 fps / 66 ms/frame</div>
+          <select id="framerate-select" class="range" onchange="if (this.value !== 'custom') Main.setFPS(this.value)">
+            <option value="10">10 fps / Stable</option>
+            <option value="12">12 fps</option>
+            <option value="15" selected>15 fps / Default</option>
+            <option value="18">18 fps</option>
+            <option value="20">20 fps</option>
+            <option value="24">24 fps / Fast</option>
+            <option value="30">30 fps / Turbo</option>
+            <option value="custom">Custom (slider)</option>
+          </select>
+          <input id="framerate-range" type="range" class="range" min="5" max="30" step="1" value="15" oninput="Main.setFPS(this.value)"
             onchange="Main.setFPS(this.value)" />
         </li>
         <li class="small"><a href="javascript:void(0)" onclick="Main.toggleFullscreen()">Fullscreen</a></li>

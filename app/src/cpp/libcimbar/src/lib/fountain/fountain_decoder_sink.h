@@ -7,22 +7,41 @@
 #include "compression/zstd_header_check.h"
 #include "serialize/format.h"
 #include "util/File.h"
+#include "PicoSHA2/picosha2.h"
 
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
+inline std::string sha256_file_hex(const std::string& file_path)
+{
+	std::ifstream f(file_path, std::ios::binary);
+	if (!f.good())
+		return "";
+	std::vector<unsigned char> hash(picosha2::k_digest_size);
+	picosha2::hash256(f, hash.begin(), hash.end());
+	return picosha2::bytes_to_hex_string(hash);
+}
+
 template <typename OUTSTREAM>
 std::function<std::string(const std::string&, const std::vector<uint8_t>&)> write_on_store(std::string data_dir, bool log_writes=false)
 {
-	return [data_dir, log_writes](const std::string& filename, const std::vector<uint8_t>& data)
+	return [data_dir, log_writes](const std::string& filename, const std::vector<uint8_t>& data) -> std::string
 	{
 		std::string file_path = fmt::format("{}/{}", data_dir, filename);
 		OUTSTREAM f(file_path, std::ios::binary);
+		if (!f.good())
+			return "";
 		f.write((char*)data.data(), data.size());
+		if (!f.good())
+		{
+			std::filesystem::remove(file_path);
+			return "";
+		}
 		if (log_writes)
 			printf("%s\n", file_path.c_str());
 		return filename;
@@ -32,17 +51,35 @@ std::function<std::string(const std::string&, const std::vector<uint8_t>&)> writ
 template <typename OUTSTREAM>
 std::function<std::string(const std::string&, const std::vector<uint8_t>&)> decompress_on_store(std::string data_dir, bool log_writes=false)
 {
-	return [data_dir, log_writes](const std::string& fallback_name, const std::vector<uint8_t>& data)
+	return [data_dir, log_writes](const std::string& fallback_name, const std::vector<uint8_t>& data) -> std::string
 	{
 		std::string filename = cimbar::zstd_header_check::get_filename(data.data(), data.size());
+		std::string expected_sha256 = cimbar::zstd_header_check::get_sha256_hex(data.data(), data.size());
 		if (!filename.empty())
 			filename = File::basename(filename);
 		if (filename.empty())
 			filename = fallback_name;
 
 		std::string file_path = fmt::format("{}/{}", data_dir, filename);
-		cimbar::zstd_decompressor<OUTSTREAM> f(file_path, std::ios::binary);
-		f.write((char*)data.data(), data.size());
+		bool write_ok = false;
+		{
+			cimbar::zstd_decompressor<OUTSTREAM> f(file_path, std::ios::binary);
+			write_ok = f.good() && f.write((char*)data.data(), data.size());
+		}
+		if (!write_ok)
+		{
+			std::filesystem::remove(file_path);
+			return "";
+		}
+		if (!expected_sha256.empty())
+		{
+			std::string actual_sha256 = sha256_file_hex(file_path);
+			if (actual_sha256 != expected_sha256)
+			{
+				std::filesystem::remove(file_path);
+				return "";
+			}
+		}
 		if (log_writes)
 			printf("%s\n", file_path.c_str());
 		return filename;
@@ -82,6 +119,8 @@ public:
 			if (!res)
 				return false;
 			std::string filename = _onStore(get_filename(md), *res);
+			if (filename.empty())
+				return false;
 			mark_done(md, filename);
 		}
 		return true;

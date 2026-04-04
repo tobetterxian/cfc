@@ -104,6 +104,7 @@ public class OpencvCamera2View extends CameraBridgeViewBase {
 
     private void startBackgroundThread() {
         Log.i(LOGTAG, "startBackgroundThread");
+        SessionLogWriter.logGlobalEvent(getContext(), LOGTAG, "startBackgroundThread");
         stopBackgroundThread();
         mBackgroundThread = new HandlerThread("OpenCVCameraBackground");
         mBackgroundThread.start();
@@ -112,6 +113,7 @@ public class OpencvCamera2View extends CameraBridgeViewBase {
 
     private void stopBackgroundThread() {
         Log.i(LOGTAG, "stopBackgroundThread");
+        SessionLogWriter.logGlobalEvent(getContext(), LOGTAG, "stopBackgroundThread");
         if (mBackgroundThread == null)
             return;
         mBackgroundThread.quitSafely();
@@ -126,6 +128,7 @@ public class OpencvCamera2View extends CameraBridgeViewBase {
 
     protected boolean initializeCamera() {
         Log.i(LOGTAG, "initializeCamera");
+        SessionLogWriter.logGlobalEvent(getContext(), LOGTAG, "initializeCamera");
         CameraManager manager = (CameraManager) getContext().getSystemService(Context.CAMERA_SERVICE);
         try {
             String camList[] = manager.getCameraIdList();
@@ -151,12 +154,14 @@ public class OpencvCamera2View extends CameraBridgeViewBase {
             if (mCameraID != null) {
                 loadCameraCapabilities(manager, mCameraID);
                 Log.i(LOGTAG, "Opening camera: " + mCameraID);
+                SessionLogWriter.logGlobalEvent(getContext(), LOGTAG, "opening camera id=" + mCameraID);
                 manager.openCamera(mCameraID, mStateCallback, mBackgroundHandler);
             } else { // make JavaCamera2View behaves in the same way as JavaCameraView
                 Log.i(LOGTAG, "Trying to open camera with the value (" + mCameraIndex + ")");
                 if (mCameraIndex < camList.length) {
                     mCameraID = camList[mCameraIndex];
                     loadCameraCapabilities(manager, mCameraID);
+                    SessionLogWriter.logGlobalEvent(getContext(), LOGTAG, "opening indexed camera id=" + mCameraID);
                     manager.openCamera(mCameraID, mStateCallback, mBackgroundHandler);
                 } else {
                     // CAMERA_DISCONNECTED is used when the camera id is no longer valid
@@ -179,17 +184,20 @@ public class OpencvCamera2View extends CameraBridgeViewBase {
         @Override
         public void onOpened(CameraDevice cameraDevice) {
             mCameraDevice = cameraDevice;
+            SessionLogWriter.logGlobalEvent(getContext(), LOGTAG, "camera onOpened id=" + cameraDevice.getId());
             createCameraPreviewSession();
         }
 
         @Override
         public void onDisconnected(CameraDevice cameraDevice) {
+            SessionLogWriter.logGlobalEvent(getContext(), LOGTAG, "camera onDisconnected id=" + cameraDevice.getId());
             cameraDevice.close();
             mCameraDevice = null;
         }
 
         @Override
         public void onError(CameraDevice cameraDevice, int error) {
+            SessionLogWriter.logGlobalEvent(getContext(), LOGTAG, "camera onError id=" + cameraDevice.getId() + " error=" + error);
             cameraDevice.close();
             mCameraDevice = null;
         }
@@ -199,6 +207,7 @@ public class OpencvCamera2View extends CameraBridgeViewBase {
     private void createCameraPreviewSession() {
         final int w = mPreviewSize.getWidth(), h = mPreviewSize.getHeight();
         Log.i(LOGTAG, "createCameraPreviewSession(" + w + "x" + h + ")");
+        SessionLogWriter.logGlobalEvent(getContext(), LOGTAG, "createCameraPreviewSession size=" + w + "x" + h);
         if (w < 0 || h < 0)
             return;
         try {
@@ -241,6 +250,7 @@ public class OpencvCamera2View extends CameraBridgeViewBase {
                     public void onConfigured(CameraCaptureSession cameraCaptureSession) {
                         Log.i(LOGTAG, "createCaptureSession::onConfigured");
                         if (null == mCameraDevice) {
+                            SessionLogWriter.logGlobalEvent(getContext(), LOGTAG, "capture session configured after camera close");
                             return; // camera is already closed
                         }
                         mCaptureSession = cameraCaptureSession;
@@ -248,26 +258,31 @@ public class OpencvCamera2View extends CameraBridgeViewBase {
                             applyCaptureProfile(mPreviewRequestBuilder);
                             mCaptureSession.setRepeatingRequest(mPreviewRequestBuilder.build(), null, mBackgroundHandler);
                             Log.i(LOGTAG, "CameraPreviewSession has been started with " + mCapabilitySummary);
+                            SessionLogWriter.logGlobalEvent(getContext(), LOGTAG, "capture session started " + mCapabilitySummary);
                         } catch (Exception e) {
                             Log.e(LOGTAG, "createCaptureSession failed", e);
+                            SessionLogWriter.logGlobalEvent(getContext(), LOGTAG, "createCaptureSession failed " + e);
                         }
                     }
 
                     @Override
                     public void onConfigureFailed(CameraCaptureSession cameraCaptureSession) {
                         Log.e(LOGTAG, "createCameraPreviewSession failed");
+                        SessionLogWriter.logGlobalEvent(getContext(), LOGTAG, "createCameraPreviewSession onConfigureFailed");
                     }
                 },
                 null
             );
         } catch (CameraAccessException e) {
             Log.e(LOGTAG, "createCameraPreviewSession", e);
+            SessionLogWriter.logGlobalEvent(getContext(), LOGTAG, "createCameraPreviewSession CameraAccessException " + e);
         }
     }
 
     @Override
     protected void disconnectCamera() {
         Log.i(LOGTAG, "close camera");
+        SessionLogWriter.logGlobalEvent(getContext(), LOGTAG, "disconnectCamera");
         try {
             CameraDevice c = mCameraDevice;
             mCameraDevice = null;
@@ -286,6 +301,7 @@ public class OpencvCamera2View extends CameraBridgeViewBase {
             }
         }
         Log.i(LOGTAG, "camera closed!");
+        SessionLogWriter.logGlobalEvent(getContext(), LOGTAG, "camera closed");
     }
 
     public static class JavaCameraSizeAccessor implements ListItemAccessor {
@@ -337,10 +353,22 @@ public class OpencvCamera2View extends CameraBridgeViewBase {
     @Override
     protected boolean connectCamera(int width, int height) {
         Log.i(LOGTAG, "setCameraPreviewSize(" + width + "x" + height + ")");
+        SessionLogWriter.logGlobalEvent(getContext(), LOGTAG, "connectCamera requested=" + width + "x" + height);
         startBackgroundThread();
-        initializeCamera();
+        if (!initializeCamera()) {
+            Log.e(LOGTAG, "connectCamera aborted: initializeCamera failed");
+            SessionLogWriter.logGlobalEvent(getContext(), LOGTAG, "connectCamera aborted initializeCamera failed");
+            stopBackgroundThread();
+            return false;
+        }
         try {
             boolean needReconfig = calcPreviewSize(width, height);
+            if (mPreviewSize.getWidth() <= 0 || mPreviewSize.getHeight() <= 0) {
+                Log.e(LOGTAG, "connectCamera aborted: invalid preview size " + mPreviewSize);
+                SessionLogWriter.logGlobalEvent(getContext(), LOGTAG, "connectCamera invalid preview size=" + mPreviewSize);
+                disconnectCamera();
+                return false;
+            }
             mFrameWidth = mPreviewSize.getWidth();
             mFrameHeight = mPreviewSize.getHeight();
 
@@ -360,6 +388,8 @@ public class OpencvCamera2View extends CameraBridgeViewBase {
                 createCameraPreviewSession();
             }
         } catch (RuntimeException e) {
+            SessionLogWriter.logGlobalEvent(getContext(), LOGTAG, "connectCamera runtime exception " + e);
+            disconnectCamera();
             throw new RuntimeException("Interrupted while setCameraPreviewSize.", e);
         }
         return true;
@@ -386,12 +416,10 @@ public class OpencvCamera2View extends CameraBridgeViewBase {
                 " profile=" + mSelectedProfile.describe() +
                 " fpsRange=" + (mSelectedFpsRange == null ? "none" : mSelectedFpsRange.toString());
         Log.i(LOGTAG, "Camera2 capabilities: " + mCapabilitySummary);
+        SessionLogWriter.logGlobalEvent(getContext(), LOGTAG, "capabilities " + mCapabilitySummary);
     }
 
     private CameraCaptureProfile selectCaptureProfile() {
-        if (mSupportsManualSensor && mSupportsManualPostProcessing && mSupportsHighSpeedVideo) {
-            return CameraCaptureProfile.throughput();
-        }
         if (mSupportsAeLock && mSupportsAwbLock) {
             return CameraCaptureProfile.balanced();
         }

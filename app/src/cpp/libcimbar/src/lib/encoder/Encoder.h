@@ -173,17 +173,28 @@ inline fountain_encoder_stream::ptr Encoder::create_fountain_encoder(STREAM& str
 		ss << stream.rdbuf();
 	else
 	{
-		cimbar::zstd_compressor<std::stringstream> f;
-		if (!filename.empty())
-			f.write_header(filename.data(), filename.size());
-		if (!f.compress(stream))
+		cimbar::zstd_compressor<std::stringstream> compressed;
+		if (!compressed.compress(stream))
 			return nullptr;
+		std::string sha256 = compressed.raw_sha256_hex();
+
+		std::stringstream final_stream;
+		cimbar::zstd_compressor<std::stringstream> meta;
+		if (!filename.empty())
+			meta.write_header(filename.data(), filename.size());
+		if (!sha256.empty())
+			meta.write_checksum_hex(sha256);
+		final_stream << meta.rdbuf() << compressed.rdbuf();
 
 		// find size of compressed zstd stream, and pad it if necessary.
-		size_t compressedSize = f.size();
+		size_t compressedSize = final_stream.str().size();
 		if (compressedSize < chunk_size)
-			f.pad(chunk_size - compressedSize + 1);
-		ss = std::move(f);
+		{
+			cimbar::zstd_compressor<std::stringstream> padder;
+			padder.pad(chunk_size - compressedSize + 1);
+			final_stream << padder.rdbuf();
+		}
+		ss = std::move(final_stream);
 	}
 
 	return fountain_encoder_stream::create(ss, chunk_size, _encodeId);

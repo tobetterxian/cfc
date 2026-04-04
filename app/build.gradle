@@ -19,10 +19,31 @@ def cimbarSenderHtmlSource = file("src/cpp/libcimbar/web/cimbar_js.html")
 def cimbarSenderHtmlAsset = file("src/main/assets/cimbar_js.html")
 def cimbarSenderBuildScript = file("src/cpp/libcimbar/build-sender-single.py")
 def resolvedPythonExecutable = localProperties.getProperty("python") ?: project.findProperty("python") ?: "python"
+def defaultDebugKeystore = new File(System.properties['user.home'], ".android/debug.keystore")
+def resolvedReleaseStoreFile = localProperties.getProperty("releaseStoreFile")
+        ?: project.findProperty("releaseStoreFile")
+        ?: defaultDebugKeystore.absolutePath
+def resolvedReleaseStorePassword = localProperties.getProperty("releaseStorePassword")
+        ?: project.findProperty("releaseStorePassword")
+        ?: "android"
+def resolvedReleaseKeyAlias = localProperties.getProperty("releaseKeyAlias")
+        ?: project.findProperty("releaseKeyAlias")
+        ?: "androiddebugkey"
+def resolvedReleaseKeyPassword = localProperties.getProperty("releaseKeyPassword")
+        ?: project.findProperty("releaseKeyPassword")
+        ?: "android"
 
 android {
     compileSdkVersion 34
     ndkVersion "27.1.12297006"
+    signingConfigs {
+        releaseFallback {
+            storeFile file(resolvedReleaseStoreFile)
+            storePassword resolvedReleaseStorePassword
+            keyAlias resolvedReleaseKeyAlias
+            keyPassword resolvedReleaseKeyPassword
+        }
+    }
     defaultConfig {
         applicationId "org.cimbar.camerafilecopy"
         minSdkVersion 21
@@ -45,6 +66,7 @@ android {
     }
     buildTypes {
         release {
+            signingConfig signingConfigs.releaseFallback
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
@@ -100,6 +122,9 @@ tasks.register("generateCimbarSenderHtml", Exec) {
 preBuild.dependsOn(tasks.named("syncCimbarSenderHtml"))
 
 preBuild.doFirst {
+    if (!file(resolvedReleaseStoreFile).exists()) {
+        throw new GradleException("Missing release signing keystore at " + resolvedReleaseStoreFile + ". Set releaseStoreFile in local.properties or ensure ~/.android/debug.keystore exists.")
+    }
     if (!file(resolvedOpenCvSdk + "/sdk/native").exists()) {
         throw new GradleException("Missing OpenCV Android SDK. Set opencvsdk to the extracted OpenCV-android-sdk path.")
     }

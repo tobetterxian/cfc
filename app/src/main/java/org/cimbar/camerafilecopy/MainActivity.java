@@ -43,6 +43,7 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
     private static final int CAMERA_PERMISSION_REQUEST = 1;
     private static final int CREATE_FILE = 11;
     private static final int MAX_DECODER_BACKLOG = 2;
+    private static final int COMPLETION_STABILITY_FRAMES = 4;
     private static final String FORCE_LEGACY_CAMERA_FLAG = "force-legacy-camera";
 
     private GestureDetectorCompat mDetector;
@@ -57,20 +58,28 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
     private String dataPath;
     private String activePath;
     private SessionLogWriter sessionLogger;
+    private boolean openCvReady = false;
+    private boolean nativeLibraryLoaded = false;
+    private String pendingCompletedName;
+    private String pendingCompletedPath;
+    private int pendingCompletedStableFrames = 0;
 
     private BaseLoaderCallback mLoaderCallback = new BaseLoaderCallback(this) {
         @Override
         public void onManagerConnected(int status) {
             if (status == LoaderCallbackInterface.SUCCESS) {
                 Log.i(TAG, "OpenCV loaded successfully");
+                openCvReady = true;
 
                 // Load native library after(!) OpenCV initialization
-                System.loadLibrary("cfc-cpp");
-
-                if (mOpenCvCameraView != null) {
-                    mOpenCvCameraView.enableView();
+                if (!nativeLibraryLoaded) {
+                    System.loadLibrary("cfc-cpp");
+                    nativeLibraryLoaded = true;
                 }
+
+                enableCameraViewIfReady();
             } else {
+                openCvReady = false;
                 super.onManagerConnected(status);
             }
         }
@@ -80,16 +89,20 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
     public void onCreate(Bundle savedInstanceState) {
         Log.i(TAG, "called onCreate");
         super.onCreate(savedInstanceState);
+        SessionLogWriter.logGlobalEvent(this, TAG, "onCreate savedInstanceState=" + (savedInstanceState != null));
 
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
 
         // Permissions for Android 6+
-        ActivityCompat.requestPermissions(
-                this,
-                new String[]{Manifest.permission.CAMERA},
-                CAMERA_PERMISSION_REQUEST
-        );
+        if (!hasCameraPermission()) {
+            SessionLogWriter.logGlobalEvent(this, TAG, "requesting camera permission");
+            ActivityCompat.requestPermissions(
+                    this,
+                    new String[]{Manifest.permission.CAMERA},
+                    CAMERA_PERMISSION_REQUEST
+            );
+        }
 
         this.dataPath = this.getFilesDir().getPath();
         //this.dataPath = this.getExternalFilesDir(null).getPath(); // for manual testing
@@ -125,30 +138,39 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         if (requestCode == CAMERA_PERMISSION_REQUEST) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                debugEvent("camera permission granted");
                 grantCameraPermissionIfAvailable();
+                enableCameraViewIfReady();
             } else {
                 String message = "Camera permission was not granted";
                 Log.e(TAG, message);
+                debugEvent(message);
                 Toast.makeText(this, message, Toast.LENGTH_LONG).show();
             }
         } else {
             Log.e(TAG, "Unexpected permission request");
+            debugEvent("Unexpected permission request code=" + requestCode);
         }
     }
 
     @Override
     public void onStart() {
         super.onStart();
+        debugEvent("onStart");
         introToast.show();
         // reset autodetect
         mModeSwitch.setChecked(false);
         modeVal = 0;
+        resetPendingCompletion("onStart");
     }
 
     @Override
     public void onPause() {
+        debugEvent("onPause activePath=" + activePath);
+        resetPendingCompletion("onPause");
         closeSessionLogger();
         shutdownJNI();
+        openCvReady = false;
         super.onPause();
         disableAllCameraViews();
     }
@@ -157,6 +179,7 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
     public void onResume() {
         super.onResume();
         ensureSessionLogger();
+        debugEvent("onResume");
         if (!OpenCVLoader.initDebug()) {
             Log.d(TAG, "Internal OpenCV library not found. Using OpenCV Manager for initialization");
             OpenCVLoader.initAsync(OpenCVLoader.OPENCV_VERSION, this, mLoaderCallback);
@@ -168,6 +191,8 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
 
     @Override
     public void onDestroy() {
+        debugEvent("onDestroy activePath=" + activePath);
+        resetPendingCompletion("onDestroy");
         closeSessionLogger();
         shutdownJNI();
         super.onDestroy();
@@ -208,6 +233,9 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
         // res will contain a file path if we completed a transfer. Ask the user where to save it
         if (res.startsWith("/")) {
             detectedMode = parseDetectedModeResult(res);
+            debugEvent("detected mode payload=" + res + " decodedMode=" + detectedMode +
+                    " telemetry decoded=" + telemetry.decoded + " perfect=" + telemetry.perfect +
+                    " filesInFlight=" + telemetry.filesInFlight + " filesDecoded=" + telemetry.filesDecoded);
             runOnUiThread(new Runnable() {
                 @Override
                 public void run() {
@@ -218,14 +246,17 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
 
         }
         else if (!res.isEmpty()) {
-            Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
-            intent.addCategory(Intent.CATEGORY_OPENABLE);
-            intent.setType("application/octet-stream");
-            intent.putExtra(Intent.EXTRA_TITLE, res);
-            // can't get putExtra to work for extra values, so we'll save it in the class
-            this.activePath = this.dataPath + "/" + res;
-            startActivityForResult(intent, CREATE_FILE);
+            pendingCompletedName = res;
+            pendingCompletedPath = this.dataPath + "/" + res;
+            pendingCompletedStableFrames = 0;
+            debugEvent("queued create-document candidate result=" + res +
+                    " telemetry decoded=" + telemetry.decoded +
+                    " perfect=" + telemetry.perfect +
+                    " filesInFlight=" + telemetry.filesInFlight +
+                    " filesDecoded=" + telemetry.filesDecoded);
         }
+
+        maybeLaunchCompletedTransfer(telemetry);
 
         // return processed frame for live preview
         return mat;
@@ -291,7 +322,7 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
     }
 
     private void grantCameraPermissionIfAvailable() {
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+        if (!hasCameraPermission()) {
             return;
         }
         if (mLegacyCameraView != null) {
@@ -302,12 +333,33 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
         }
     }
 
+    private boolean hasCameraPermission() {
+        return ActivityCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void enableCameraViewIfReady() {
+        if (!openCvReady) {
+            Log.i(TAG, "Skipping camera enable: OpenCV not ready yet");
+            return;
+        }
+        if (!hasCameraPermission()) {
+            Log.i(TAG, "Skipping camera enable: camera permission not granted yet");
+            return;
+        }
+        grantCameraPermissionIfAvailable();
+        if (mOpenCvCameraView != null) {
+            Log.i(TAG, "Enabling camera view after OpenCV/permission readiness");
+            mOpenCvCameraView.enableView();
+        }
+    }
+
     private void ensureSessionLogger() {
         if (sessionLogger != null) {
             return;
         }
         try {
             sessionLogger = SessionLogWriter.open(this);
+            sessionLogger.logEvent(TAG, "session logger ready dir=" + sessionLogger.getSessionDir().getAbsolutePath());
         } catch (IOException e) {
             Log.e(TAG, "Failed to create session logger", e);
         }
@@ -328,6 +380,8 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
 
     @Override
     protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
+        debugEvent("onActivityResult requestCode=" + requestCode + " resultCode=" + resultCode +
+                " hasData=" + (data != null) + " activePath=" + activePath);
         if (resultCode == RESULT_OK && requestCode == CREATE_FILE) {
             if (this.activePath == null)
                 return;
@@ -345,12 +399,83 @@ public class MainActivity extends Activity implements CvCameraViewListener2 {
                 ostream.flush();
             } catch (Exception e) {
                 Log.e(TAG, "failed to write file " + e.toString());
+                debugEvent("failed to write file " + e);
             } finally {
                 try {
                     new File(this.activePath).delete();
                 } catch (Exception e) {}
                 this.activePath = null;
+                debugEvent("create-document flow finished");
+                resetPendingCompletion("activityResult-finished");
             }
+        } else if (requestCode == CREATE_FILE) {
+            debugEvent("create-document cancelled or failed resultCode=" + resultCode);
+            this.activePath = null;
+            resetPendingCompletion("activityResult-cancelled");
+        }
+    }
+
+    private void maybeLaunchCompletedTransfer(NativeTelemetrySnapshot telemetry) {
+        if (activePath != null || pendingCompletedName == null || pendingCompletedPath == null) {
+            return;
+        }
+        boolean storageLooksReady = telemetry.filesDecoded > 0 && telemetry.filesInFlight == 0;
+        File candidate = new File(pendingCompletedPath);
+        boolean fileExists = candidate.exists() && candidate.length() > 0;
+        if (!storageLooksReady || !fileExists) {
+            if (pendingCompletedStableFrames != 0) {
+                debugEvent("completion candidate lost stability name=" + pendingCompletedName +
+                        " filesDecoded=" + telemetry.filesDecoded +
+                        " filesInFlight=" + telemetry.filesInFlight +
+                        " exists=" + fileExists +
+                        " size=" + candidate.length());
+            }
+            pendingCompletedStableFrames = 0;
+            return;
+        }
+
+        pendingCompletedStableFrames++;
+        if (pendingCompletedStableFrames < COMPLETION_STABILITY_FRAMES) {
+            debugEvent("completion candidate stabilizing name=" + pendingCompletedName +
+                    " frame=" + pendingCompletedStableFrames + "/" + COMPLETION_STABILITY_FRAMES +
+                    " size=" + candidate.length());
+            return;
+        }
+
+        debugEvent("launching create-document result=" + pendingCompletedName +
+                " size=" + candidate.length() +
+                " telemetry decoded=" + telemetry.decoded +
+                " perfect=" + telemetry.perfect +
+                " filesInFlight=" + telemetry.filesInFlight +
+                " filesDecoded=" + telemetry.filesDecoded);
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/octet-stream");
+        intent.putExtra(Intent.EXTRA_TITLE, pendingCompletedName);
+        this.activePath = pendingCompletedPath;
+        debugEvent("activePath=" + activePath);
+        pendingCompletedName = null;
+        pendingCompletedPath = null;
+        pendingCompletedStableFrames = 0;
+        startActivityForResult(intent, CREATE_FILE);
+    }
+
+    private void resetPendingCompletion(String reason) {
+        if (pendingCompletedName != null || pendingCompletedStableFrames != 0) {
+            debugEvent("reset pending completion reason=" + reason +
+                    " name=" + pendingCompletedName +
+                    " stableFrames=" + pendingCompletedStableFrames);
+        }
+        pendingCompletedName = null;
+        pendingCompletedPath = null;
+        pendingCompletedStableFrames = 0;
+    }
+
+    private void debugEvent(String message) {
+        if (sessionLogger != null) {
+            sessionLogger.logEvent(TAG, message);
+        } else {
+            SessionLogWriter.logGlobalEvent(this, TAG, message);
         }
     }
 

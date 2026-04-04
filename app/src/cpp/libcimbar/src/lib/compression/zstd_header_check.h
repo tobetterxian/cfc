@@ -11,25 +11,40 @@ class zstd_header_check
 public:
 	static std::string get_filename(const unsigned char* data, size_t len)
 	{
-		if (!ZSTD_isSkippableFrame(data, len))
-			return "";
+		return get_metadata(data, len, 1);
+	}
 
-		std::string res;
-		res.resize(500, '\0');
-		size_t sz = ZSTD_readSkippableFrame(res.data(), res.size(), nullptr, data, len);
-		if (sz <= 1)
-			return "";
+	static std::string get_sha256_hex(const unsigned char* data, size_t len)
+	{
+		return get_metadata(data, len, 2);
+	}
 
-		switch (res[0])
+protected:
+	static std::string get_metadata(const unsigned char* data, size_t len, unsigned char expected_type)
+	{
+		size_t offset = 0;
+		while (offset + 8 <= len)
 		{
-			case 1:
-				return std::string(&res[1], sz-1);
-			default:
+			const unsigned char* frame = data + offset;
+			size_t remaining = len - offset;
+			if (!ZSTD_isSkippableFrame(frame, remaining))
 				break;
+
+			size_t payload = static_cast<size_t>(frame[4]) |
+			                 (static_cast<size_t>(frame[5]) << 8) |
+			                 (static_cast<size_t>(frame[6]) << 16) |
+			                 (static_cast<size_t>(frame[7]) << 24);
+			size_t total = payload + 8;
+			if (payload == 0 || total > remaining)
+				break;
+
+			if (frame[8] == expected_type)
+				return std::string(reinterpret_cast<const char*>(frame + 9), payload - 1);
+
+			offset += total;
 		}
 		return "";
 	}
-
 };
 
 }

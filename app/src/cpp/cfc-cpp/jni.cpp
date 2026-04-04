@@ -10,6 +10,7 @@
 #include <opencv2/core/core.hpp>
 #include <opencv2/core/ocl.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
+#include <chrono>
 #include <memory>
 #include <mutex>
 #include <sstream>
@@ -28,6 +29,11 @@ namespace {
 	int _transferStatus = 0;
 	clock_t _frameDecodeSnapshot = 0;
 	clock_t _frameSuccessSnapshot = 0;
+	clock_t _rateBytesSnapshot = 0;
+	std::chrono::steady_clock::time_point _rateSnapshotTime = std::chrono::steady_clock::time_point{};
+	std::chrono::steady_clock::time_point _transferStartTime = std::chrono::steady_clock::time_point{};
+	double _liveBytesPerSec = 0.0;
+	double _averageBytesPerSec = 0.0;
 
 	unsigned millis(unsigned num, unsigned denom)
 	{
@@ -50,6 +56,11 @@ namespace {
 		_transferStatus = 0;
 		_frameDecodeSnapshot = 0;
 		_frameSuccessSnapshot = 0;
+		_rateBytesSnapshot = 0;
+		_rateSnapshotTime = std::chrono::steady_clock::time_point{};
+		_transferStartTime = std::chrono::steady_clock::time_point{};
+		_liveBytesPerSec = 0.0;
+		_averageBytesPerSec = 0.0;
 		MultiThreadedDecoder::count = 0;
 		MultiThreadedDecoder::bytes = 0;
 		MultiThreadedDecoder::perfect = 0;
@@ -203,6 +214,134 @@ namespace {
 		//*/
 	}
 
+	std::string mode_name(int modeVal)
+	{
+		switch (modeVal)
+		{
+			case 4:
+				return "4C";
+			case 66:
+				return "Bu";
+			case 67:
+				return "Bm";
+			case 68:
+				return "B";
+			case 69:
+				return "5x5";
+			case 70:
+				return "5x5d";
+			case 0:
+			default:
+				return "?";
+		}
+	}
+
+	void update_live_rate()
+	{
+		auto now = std::chrono::steady_clock::now();
+		const bool transferActive = MultiThreadedDecoder::bytes > 0 || _transferStatus > 0;
+		if (transferActive && _transferStartTime == std::chrono::steady_clock::time_point{})
+			_transferStartTime = now;
+		if (_rateSnapshotTime == std::chrono::steady_clock::time_point{})
+		{
+			_rateSnapshotTime = now;
+			_rateBytesSnapshot = MultiThreadedDecoder::bytes;
+			_liveBytesPerSec = 0.0;
+			_averageBytesPerSec = 0.0;
+			return;
+		}
+
+		const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - _rateSnapshotTime).count();
+		if (elapsed < 250)
+			return;
+
+		const clock_t bytesDelta = MultiThreadedDecoder::bytes - _rateBytesSnapshot;
+		const double instantRate = (bytesDelta > 0 && elapsed > 0)
+			? (static_cast<double>(bytesDelta) * 1000.0 / static_cast<double>(elapsed))
+			: 0.0;
+		_liveBytesPerSec = (_liveBytesPerSec <= 0.0)
+			? instantRate
+			: (_liveBytesPerSec * 0.65 + instantRate * 0.35);
+		if (_transferStartTime != std::chrono::steady_clock::time_point{})
+		{
+			const auto totalElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - _transferStartTime).count();
+			if (totalElapsed > 0)
+				_averageBytesPerSec = static_cast<double>(MultiThreadedDecoder::bytes) * 1000.0 / static_cast<double>(totalElapsed);
+		}
+		_rateBytesSnapshot = MultiThreadedDecoder::bytes;
+		_rateSnapshotTime = now;
+	}
+
+	std::string format_rate(double bytesPerSec)
+	{
+		std::stringstream stream;
+		stream.setf(std::ios::fixed);
+		stream.precision(1);
+		if (bytesPerSec >= 1024.0 * 1024.0)
+			stream << (bytesPerSec / (1024.0 * 1024.0)) << " MB/s";
+		else if (bytesPerSec >= 1024.0)
+			stream << (bytesPerSec / 1024.0) << " KB/s";
+		else
+			stream << bytesPerSec << " B/s";
+		return stream.str();
+	}
+
+	void drawTransferOverlay(cv::Mat& mat, const MultiThreadedDecoder& proc)
+	{
+		const int configuredMode = proc.mode();
+		const int detectedMode = proc.detected_mode();
+		const std::string activeMode = configuredMode == 0
+			? fmt::format("AUTO -> {}", mode_name(detectedMode))
+			: mode_name(configuredMode);
+		const std::string modeLine = fmt::format(
+			"Mode: {}  [{}|{}]  Files: {}/{}",
+			activeMode,
+			configuredMode == 0 ? "auto" : "lock",
+			detectedMode ? mode_name(detectedMode) : "?",
+			proc.files_decoded(),
+			proc.files_in_flight()
+		);
+		const std::string rateLine = fmt::format(
+			"Rate: {}  Decoded: {} KB",
+			format_rate(_liveBytesPerSec),
+			MultiThreadedDecoder::bytes / 1024
+		);
+		double maxProgress = 0.0;
+		for (double p : proc.get_progress())
+			maxProgress = std::max(maxProgress, p);
+		std::string progressLine = fmt::format(
+			"Avg: {}  Progress: {}%",
+			format_rate(_averageBytesPerSec),
+			static_cast<int>(maxProgress * 100.0)
+		);
+		if (maxProgress > 0.01 && maxProgress < 0.999 && _transferStartTime != std::chrono::steady_clock::time_point{})
+		{
+			auto now = std::chrono::steady_clock::now();
+			const double elapsedSec = std::chrono::duration_cast<std::chrono::milliseconds>(now - _transferStartTime).count() / 1000.0;
+			if (elapsedSec > 0.0)
+			{
+				const double etaSec = elapsedSec * (1.0 - maxProgress) / maxProgress;
+				progressLine += fmt::format("  ETA: {}s", static_cast<int>(etaSec + 0.5));
+			}
+		}
+
+		const int minsz = std::min(mat.cols, mat.rows);
+		const double fontScale = std::max(0.55, minsz / 900.0);
+		const int thickness = std::max(1, minsz / 420);
+		const int left = std::max(10, minsz / 40);
+		const int top = std::max(36, minsz / 18);
+		const int lineGap = std::max(26, minsz / 18);
+		const cv::Scalar outline(0, 0, 0);
+		const cv::Scalar color(255, 255, 80);
+
+		cv::putText(mat, modeLine, cv::Point(left, top), cv::FONT_HERSHEY_DUPLEX, fontScale, outline, thickness + 2);
+		cv::putText(mat, modeLine, cv::Point(left, top), cv::FONT_HERSHEY_DUPLEX, fontScale, color, thickness);
+		cv::putText(mat, rateLine, cv::Point(left, top + lineGap), cv::FONT_HERSHEY_DUPLEX, fontScale, outline, thickness + 2);
+		cv::putText(mat, rateLine, cv::Point(left, top + lineGap), cv::FONT_HERSHEY_DUPLEX, fontScale, color, thickness);
+		cv::putText(mat, progressLine, cv::Point(left, top + lineGap * 2), cv::FONT_HERSHEY_DUPLEX, fontScale, outline, thickness + 2);
+		cv::putText(mat, progressLine, cv::Point(left, top + lineGap * 2), cv::FONT_HERSHEY_DUPLEX, fontScale, color, thickness);
+	}
+
 	std::string jstring_to_cppstr(JNIEnv *env, const jstring& dataPathObj)
 	{
 		const char* temp = env->GetStringUTFChars(dataPathObj, NULL);
@@ -245,9 +384,10 @@ Java_org_cimbar_camerafilecopy_MainActivity_processImageJNI(JNIEnv *env, jobject
 		_frameSuccessSnapshot = perfectSnapshot;
 	}
 
+	update_live_rate();
 	drawProgress(mat, proc->get_progress());
 	drawGuidance(mat, _transferStatus);
-	//drawDebugInfo(mat, *proc);
+	drawTransferOverlay(mat, *proc);
 
 	// log computation time to Android Logcat
 	double totalTime = double(clock() - begin) / CLOCKS_PER_SEC;

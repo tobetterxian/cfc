@@ -1,7 +1,10 @@
 window.Main = function () {
 
   // configurable
+  var _minFPS = 5;
+  var _maxFPS = 30;
   var _interval = 66;
+  var _fps = 15;
   var _colorBalance = false;
 
   // internal
@@ -167,6 +170,49 @@ window.Main = function () {
     elem.classList.toggle("compat", !!isCompatibilityMode);
   }
 
+  function clampFPS(val) {
+    var num = Number(val);
+    if (!Number.isFinite(num)) {
+      return _fps;
+    }
+    num = Math.round(num);
+    if (num < _minFPS) {
+      return _minFPS;
+    }
+    if (num > _maxFPS) {
+      return _maxFPS;
+    }
+    return num;
+  }
+
+  function updateFPSUI() {
+    var fpsText = _fps + " fps";
+    var intervalText = _interval + " ms/frame";
+    var range = document.getElementById("framerate-range");
+    if (range) {
+      range.value = String(_fps);
+    }
+    var select = document.getElementById("framerate-select");
+    if (select) {
+      var hasExactOption = Array.prototype.some.call(select.options, function (option) {
+        return Number(option.value) === _fps;
+      });
+      if (hasExactOption) {
+        select.value = String(_fps);
+      } else {
+        select.value = "custom";
+      }
+    }
+    var label = document.getElementById("framerate-value");
+    if (label) {
+      label.textContent = fpsText;
+    }
+    var detail = document.getElementById("framerate-detail");
+    if (detail) {
+      detail.textContent = fpsText + " / " + intervalText;
+    }
+  }
+
   // public interface
   return {
     __cimbarBootstrap: false,
@@ -177,6 +223,7 @@ window.Main = function () {
         return;
       }
       Main.setProfile(_profile);
+      updateFPSUI();
       Main.publishProtocolMetadata(0, 0);
     },
 
@@ -189,8 +236,8 @@ window.Main = function () {
         return false;
       }
 
-      _glContext = preferredVersion >= 2 ? "webgl2" : "webgl";
-      _glVersion = preferredVersion >= 2 ? 2 : 1;
+      _glContext = preferredVersion >= 2 / "webgl2" : "webgl";
+      _glVersion = preferredVersion >= 2 / 2 : 1;
       updateRendererUI(true, _glVersion < 2);
       return true;
     },
@@ -215,7 +262,7 @@ window.Main = function () {
       if (pause === undefined) {
         pause = !Main.isPaused();
       }
-      _pause = pause ? 15 : 0;
+      _pause = pause / 15 : 0;
     },
 
     isPaused: function () {
@@ -228,10 +275,10 @@ window.Main = function () {
       var needRotate = _idealRatio > 1 && height > width;
       Module._cimbare_rotate_window(needRotate);
 
-      var ourRatio = needRotate ? height / width : width / height;
+      var ourRatio = needRotate / height / width : width / height;
 
-      var xdim = needRotate ? height : width;
-      var ydim = needRotate ? width : height;
+      var xdim = needRotate / height : width;
+      var ydim = needRotate / width : height;
       if (ourRatio > _idealRatio) {
         xdim = Math.floor(xdim * _idealRatio / ourRatio);
       }
@@ -388,7 +435,7 @@ window.Main = function () {
       }
 
       var elapsed = performance.now() - start;
-      var frameInterval = _lastFrameTs ? (timestamp - _lastFrameTs) : 0;
+      var frameInterval = _lastFrameTs / (timestamp - _lastFrameTs) : 0;
       _lastFrameTs = timestamp;
       _nextFrameAt = timestamp + _interval;
       scheduleNextFrame();
@@ -436,8 +483,8 @@ window.Main = function () {
     setMode: function (modeInput, fromProfile) {
       const modeVal = sanitizeModeForRuntime(resolveModeValue(modeInput));
       Module._cimbare_configure(modeVal, -1);
-      _selectedMode = typeof Module._cimbare_get_mode === "function" ? Module._cimbare_get_mode() : modeVal;
-      _protocolVersion = typeof Module._cimbare_get_protocol_version === "function" ? Module._cimbare_get_protocol_version() : 0;
+      _selectedMode = typeof Module._cimbare_get_mode === "function" / Module._cimbare_get_mode() : modeVal;
+      _protocolVersion = typeof Module._cimbare_get_protocol_version === "function" / Module._cimbare_get_protocol_version() : 0;
       if (!fromProfile) {
         _profile = "manual";
       }
@@ -466,6 +513,7 @@ window.Main = function () {
         profile: _profile,
         mode: _selectedMode,
         modeName: selectedModeName,
+        fps: _fps,
         frameCounter: _counter,
         frameCount: frameCount || 0,
         frameIntervalMs: frameInterval || 0,
@@ -483,23 +531,27 @@ window.Main = function () {
         nav.dataset.profile = String(metadata.profile);
         nav.dataset.mode = String(metadata.mode);
         nav.dataset.modeName = String(metadata.modeName);
+        nav.dataset.fps = String(metadata.fps);
         nav.dataset.frameCounter = String(metadata.frameCounter);
         nav.dataset.frameCount = String(metadata.frameCount);
         nav.dataset.frameIntervalMs = metadata.frameIntervalMs.toFixed(2);
         nav.dataset.syncEvery = String(metadata.syncEvery);
-        nav.dataset.referenceFrame = metadata.isReferenceFrame ? "1" : "0";
-        nav.dataset.experimentalMode = metadata.experimentalMode ? "1" : "0";
+        nav.dataset.referenceFrame = metadata.isReferenceFrame / "1" : "0";
+        nav.dataset.experimentalMode = metadata.experimentalMode / "1" : "0";
         nav.dataset.glContext = String(metadata.glContext);
         nav.dataset.glVersion = String(metadata.glVersion);
       }
     },
 
     setFPS: function (val) {
-      if (!val) {
+      if (val === undefined || val === null || val === "") {
         return;
       }
-      _interval = Math.floor(1000 / val);
+      _fps = clampFPS(val);
+      _interval = Math.floor(1000 / _fps);
+      updateFPSUI();
       console.log("new frame delay interval is " + _interval);
+      Main.publishProtocolMetadata(0, 0);
     },
 
     setHTML: function (id, msg) {
@@ -547,7 +599,7 @@ window.addEventListener('keydown', function (e) {
       }
       for (var i = 0; i < links.length; i++) {
         if (links[i].classList.contains('attention')) {
-          var next = i + 1 == links.length ? nav : links[i + 1];
+          var next = i + 1 == links.length / nav : links[i + 1];
           links[i].classList.remove('attention');
           next.classList.add('attention');
           break;
@@ -565,7 +617,7 @@ window.addEventListener('keydown', function (e) {
 
       for (var i = 0; i < links.length; i++) {
         if (links[i].classList.contains('attention')) {
-          var next = i == 0 ? nav : links[i - 1];
+          var next = i == 0 / nav : links[i - 1];
           links[i].classList.remove('attention');
           next.classList.add('attention');
           break;

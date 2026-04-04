@@ -4,6 +4,8 @@ import android.content.Context;
 import android.os.SystemClock;
 import android.util.Log;
 
+import androidx.annotation.Nullable;
+
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -18,9 +20,13 @@ final class SessionLogWriter implements Closeable {
     private static final String CSV_HEADER =
             "frame_started_ns,frame_finished_ns,frame_duration_us,requested_mode,detected_mode,result," +
             "calls,scanned,decoded,perfect,bytes,scan_ms,extract_ms,decode_ms,backlog,files_in_flight,files_decoded";
+    private static final String EVENT_HEADER = "wall_ms,realtime_ns,tag,message";
+    private static final Object EVENT_LOCK = new Object();
+    private static volatile File activeEventLogFile;
 
     private final File sessionDir;
     private final BufferedWriter frameWriter;
+    private final BufferedWriter eventWriter;
     private final long startedRealtimeNs;
     private final long startedWallMs;
 
@@ -29,16 +35,18 @@ final class SessionLogWriter implements Closeable {
     private int transferCompletions = 0;
     private boolean closed = false;
 
-    private SessionLogWriter(File sessionDir, BufferedWriter frameWriter, long startedRealtimeNs, long startedWallMs) {
+    private SessionLogWriter(File sessionDir, BufferedWriter frameWriter, BufferedWriter eventWriter,
+                             long startedRealtimeNs, long startedWallMs) {
         this.sessionDir = sessionDir;
         this.frameWriter = frameWriter;
+        this.eventWriter = eventWriter;
         this.startedRealtimeNs = startedRealtimeNs;
         this.startedWallMs = startedWallMs;
     }
 
     static SessionLogWriter open(Context context) throws IOException {
         long wallNow = System.currentTimeMillis();
-        File root = new File(context.getFilesDir(), "benchmarks/sessions");
+        File root = benchmarkRoot(context);
         if (!root.exists() && !root.mkdirs()) {
             throw new IOException("Failed to create benchmark session root: " + root);
         }
@@ -57,7 +65,23 @@ final class SessionLogWriter implements Closeable {
         frameWriter.write(CSV_HEADER);
         frameWriter.newLine();
         frameWriter.flush();
-        return new SessionLogWriter(sessionDir, frameWriter, SystemClock.elapsedRealtimeNanos(), wallNow);
+
+        File eventFile = new File(sessionDir, "events.log");
+        BufferedWriter eventWriter = new BufferedWriter(new FileWriter(eventFile, true));
+        eventWriter.write(EVENT_HEADER);
+        eventWriter.newLine();
+        eventWriter.flush();
+
+        activeEventLogFile = eventFile;
+        SessionLogWriter writer = new SessionLogWriter(
+                sessionDir,
+                frameWriter,
+                eventWriter,
+                SystemClock.elapsedRealtimeNanos(),
+                wallNow
+        );
+        writer.logEvent(TAG, "session-open root=" + root.getAbsolutePath());
+        return writer;
     }
 
     synchronized void logFrame(long frameStartedNs, long frameFinishedNs, int requestedMode,
@@ -104,14 +128,56 @@ final class SessionLogWriter implements Closeable {
         }
     }
 
+    synchronized void logEvent(String tag, String message) {
+        if (closed) {
+            return;
+        }
+        appendEventLine(eventWriter, tag, message);
+    }
+
+    static void logGlobalEvent(@Nullable Context context, String tag, String message) {
+        Log.i(tag, message);
+        synchronized (EVENT_LOCK) {
+            File target = activeEventLogFile;
+            if (target == null && context != null) {
+                File root = benchmarkRoot(context);
+                if (!root.exists()) {
+                    root.mkdirs();
+                }
+                target = new File(root, "adhoc-events.log");
+                if (!target.exists()) {
+                    try (BufferedWriter writer = new BufferedWriter(new FileWriter(target, true))) {
+                        writer.write(EVENT_HEADER);
+                        writer.newLine();
+                    } catch (IOException e) {
+                        Log.e(TAG, "Failed to initialize adhoc event log", e);
+                    }
+                }
+            }
+            if (target == null) {
+                return;
+            }
+            try (BufferedWriter writer = new BufferedWriter(new FileWriter(target, true))) {
+                appendEventLine(writer, tag, message);
+            } catch (IOException e) {
+                Log.e(TAG, "Failed to append global event", e);
+            }
+        }
+    }
+
     @Override
     public synchronized void close() throws IOException {
         if (closed) {
             return;
         }
+        logEvent(TAG, "session-close frames=" + framesSeen + " completed=" + transferCompletions);
         closed = true;
         writeSummary();
         frameWriter.close();
+        eventWriter.close();
+        if (activeEventLogFile != null && activeEventLogFile.equals(new File(sessionDir, "events.log"))) {
+            activeEventLogFile = null;
+        }
     }
 
     void closeQuietly() {
@@ -151,10 +217,39 @@ final class SessionLogWriter implements Closeable {
             throw new IOException("Failed to build JSON summary", e);
         }
 
-        BufferedWriter summaryWriter = new BufferedWriter(new FileWriter(new File(sessionDir, "summary.json")));
-        summaryWriter.write(summary.toString(2));
-        summaryWriter.newLine();
-        summaryWriter.close();
+        try (BufferedWriter summaryWriter = new BufferedWriter(new FileWriter(new File(sessionDir, "summary.json")))) {
+            try {
+                summaryWriter.write(summary.toString(2));
+            } catch (JSONException e) {
+                throw new IOException("Failed to serialize JSON summary", e);
+            }
+            summaryWriter.newLine();
+        }
+    }
+
+    File getSessionDir() {
+        return sessionDir;
+    }
+
+    private static File benchmarkRoot(Context context) {
+        File externalRoot = context.getExternalFilesDir(null);
+        if (externalRoot != null) {
+            return new File(externalRoot, "benchmarks/sessions");
+        }
+        return new File(context.getFilesDir(), "benchmarks/sessions");
+    }
+
+    private static void appendEventLine(BufferedWriter writer, String tag, String message) {
+        try {
+            writer.write(System.currentTimeMillis() + "," +
+                    SystemClock.elapsedRealtimeNanos() + "," +
+                    sanitizeCsv(tag) + "," +
+                    sanitizeCsv(message));
+            writer.newLine();
+            writer.flush();
+        } catch (IOException e) {
+            Log.e(TAG, "Failed to append event line", e);
+        }
     }
 
     private static String sanitizeCsv(String value) {
