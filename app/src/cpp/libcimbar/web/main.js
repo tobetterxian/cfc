@@ -1,4 +1,4 @@
-var Main = function () {
+window.Main = function () {
 
   // configurable
   var _interval = 66;
@@ -169,6 +169,7 @@ var Main = function () {
 
   // public interface
   return {
+    __cimbarBootstrap: false,
     init: function (canvas) {
       updateCapabilityUI();
       if (!Main.check_GL_enabled(canvas)) {
@@ -335,7 +336,27 @@ var Main = function () {
     },
 
     clickFileInput: function () {
-      document.getElementById("file_input").click();
+      var input = document.getElementById("file_input");
+      if (!input) {
+        return false;
+      }
+      if (typeof input.showPicker === "function") {
+        try {
+          input.showPicker();
+          return true;
+        } catch (err) {
+          console.log("showPicker fallback", err);
+        }
+      }
+      input.click();
+      return true;
+    },
+
+    openFilePicker: function (event) {
+      if (event && typeof event.preventDefault === "function") {
+        event.preventDefault();
+      }
+      return Main.clickFileInput();
     },
 
     fileInput: function (ev) {

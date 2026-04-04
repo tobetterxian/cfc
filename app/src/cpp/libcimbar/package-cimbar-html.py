@@ -20,7 +20,7 @@ def read_file(name):
 
 def read_script(name):
     script = read_file(name)
-    return '<script type="text/javascript">\n' + script + '\n'
+    return '<script type="text/javascript">\n' + script + '\n</script>'
 
 
 def read_wasm_data_uri():
@@ -37,7 +37,7 @@ def main():
     if '"cimbar_js.wasm"' in cimbar_js:
         cimbar_js = cimbar_js.replace('"cimbar_js.wasm"', '"' + read_wasm_data_uri() + '"')
 
-    cimbar_js = '<script type="text/javascript">\n' + cimbar_js + '\n'
+    cimbar_js = '<script type="text/javascript">\n' + cimbar_js + '\n</script>'
 
     contents = contents.replace('<script src="main.js"></script>', main_js)
     contents = contents.replace('<script src="cimbar_js.js"></script>', cimbar_js)

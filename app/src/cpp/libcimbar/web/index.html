@@ -5,7 +5,11 @@
   <title>Cimbar Encoder</title>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, user-scalable=no">
-  <link rel="manifest" href="pwa.json">
+  <script type="text/javascript">
+    if (location.protocol !== "file:") {
+      document.write('<link rel="manifest" href="pwa.json">');
+    }
+  </script>
 </head>
 
 <body>
@@ -89,6 +93,16 @@
 
     #invisible_click.active {
       cursor: none;
+    }
+
+    .visually-hidden-file-input {
+      position: fixed;
+      left: -9999px;
+      top: 0;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      pointer-events: none;
     }
 
     #nav-container:focus-within+#invisible_click {
@@ -344,7 +358,7 @@
     <canvas id="canvas" class="canvas"></canvas>
   </div>
 
-  <input style="display:none;" type="file" name="file_input" id="file_input" onchange="Main.fileInput(this);" />
+  <input class="visually-hidden-file-input" type="file" name="file_input" id="file_input" onchange="Main.fileInput(this);" />
 
   <a id="invisible_click" href="javascript:;" onclick="Main.clickNav()"></a>
 
@@ -359,7 +373,7 @@
     <div id="nav-content" tabindex="-1">
       <span id="current-file">No file selected</span>
       <ul>
-        <li><a class="attention" id="nav-find-file-link" href="javascript:void(0)" onclick="Main.clickFileInput()">Find
+        <li><a class="attention" id="nav-find-file-link" href="javascript:void(0)" onclick="return Main.openFilePicker(event)">Find
             File</a></li>
         <hr>
         <li class="modesel">
@@ -392,8 +406,69 @@
   </div>
 
   <script type="text/javascript">
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./sw.js');
+    window.Main = window.Main || {
+      __cimbarBootstrap: true,
+      clickNav: function () {
+        var navButton = document.getElementById('nav-button');
+        if (navButton) {
+          navButton.focus();
+        }
+        return false;
+      },
+      blurNav: function () {
+        var navButton = document.getElementById('nav-button');
+        var navContent = document.getElementById('nav-content');
+        var findLink = document.getElementById('nav-find-file-link');
+        if (navButton) {
+          navButton.blur();
+        }
+        if (navContent) {
+          navContent.blur();
+        }
+        if (findLink) {
+          findLink.blur();
+        }
+        return false;
+      },
+      clickFileInput: function () {
+        var input = document.getElementById('file_input');
+        if (!input) {
+          return false;
+        }
+        if (typeof input.showPicker === 'function') {
+          try {
+            input.showPicker();
+            return false;
+          } catch (err) {
+            console.log('showPicker bootstrap fallback', err);
+          }
+        }
+        input.click();
+        return false;
+      },
+      openFilePicker: function (event) {
+        if (event && typeof event.preventDefault === 'function') {
+          event.preventDefault();
+        }
+        return window.Main.clickFileInput();
+      },
+      fileInput: function () {
+        window.__cimbarPendingFileSelection = true;
+        window.Main.blurNav(false);
+        return false;
+      },
+      setMode: function () { return false; },
+      setProfile: function () { return false; },
+      setFPS: function () { return false; },
+      toggleFullscreen: function () { return false; },
+      init: function () { return false; },
+      nextFrame: function () { return false; }
+    };
+
+    if (location.protocol !== 'file:' && 'serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js').catch(function (err) {
+        console.log('serviceWorker registration skipped', err);
+      });
     }
     var canvas = document.getElementById('canvas');
 
@@ -482,6 +557,24 @@
       document.getElementById('dragdrop').classList.add('compat');
     }
 
+    function bootSenderApp() {
+      if (typeof Main === "undefined" || !Main || Main.__cimbarBootstrap) {
+        setTimeout(bootSenderApp, 0);
+        return;
+      }
+      patchBrowserCreateContext(senderContext.version);
+      patchLegacySenderRuntime();
+      Main.init(canvas);
+      Main.nextFrame();
+      var pendingInput = document.getElementById('file_input');
+      if (window.__cimbarPendingFileSelection || (pendingInput && pendingInput.files && pendingInput.files.length)) {
+        window.__cimbarPendingFileSelection = false;
+        setTimeout(function () {
+          Main.fileInput(pendingInput);
+        }, 0);
+      }
+    }
+
     var Module = {
       canvas: canvas,
       cimbarPreferredWebGLVersion: senderContext.version,
@@ -489,12 +582,7 @@
         document.getElementById('dragdrop').classList.add('error');
       },
     };
-    Module.onRuntimeInitialized = () => {
-      patchBrowserCreateContext(senderContext.version);
-      patchLegacySenderRuntime();
-      Main.init(canvas);
-      Main.nextFrame();
-    };
+    Module.onRuntimeInitialized = bootSenderApp;
   </script>
 
   <script src="cimbar_js.js"></script>
